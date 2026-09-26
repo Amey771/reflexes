@@ -1,0 +1,9 @@
+# Never upload secrets or local tooling with a deployment.
+.env
+.env*.local
+.claude
+node_modules
+.next
+scripts
+data
+HACKATHON_PLAYBOOK.md

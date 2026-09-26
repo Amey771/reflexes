@@ -26,3 +26,5 @@ HACKATHON_PLAYBOOK.md
 
 # agent worktrees
 .claude/worktrees/
+.vercel
+.env*
