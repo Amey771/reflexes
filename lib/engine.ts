@@ -21,7 +21,13 @@ export type Decision = {
   audited: boolean;
 };
 
+// Share of alerts whose reflex decisions are re-checked by System 2 in the background.
+export const AUDIT_RATE = 0.12;
+
+export type AuditUpdate = { node: NodeName; s2: Answer; agree: boolean; suggestion?: string };
+
 export type RequestResult = {
+  audit?: Promise<AuditUpdate[]>; // resolves after the decision has already been served
   seq: number;
   batch: Request["batch"];
   recall: Pick<Recall, "available" | "top" | "novel" | "neighbors">;
@@ -81,11 +87,8 @@ export async function processRequest(
 ): Promise<RequestResult> {
   const t0 = performance.now();
   const all = NODES.map((n) => [n, h.nodes[n]] as [NodeName, NodeConfig]);
-  const audited = new Set(
-    all.filter(([, c]) => c.mode === "reflex" && Math.random() < c.thresholds.audit_rate).map(([n]) => n),
-  );
-  // System 2 starts right away for shadow and audited nodes; System 1 and memory recall always run.
-  const s2First = all.filter(([n, c]) => c.mode === "shadow" || audited.has(n));
+  // System 2 starts right away for shadow nodes; System 1 and memory recall always run.
+  const s2First = all.filter(([, c]) => c.mode === "shadow");
   const s2Promise: Promise<System2Result | null> = s2First.length ? askSystem2(req, s2First) : Promise.resolve(null);
   const [s1, mem] = await Promise.all([runSystem1(req, all), recall(req.text)]);
 
@@ -93,7 +96,7 @@ export async function processRequest(
   // in memory, or when this reflex hasn't proven itself on similar past alerts.
   const reason = new Map<NodeName, NonNullable<Decision["fallback_reason"]>>();
   for (const [n, c] of all) {
-    if (c.mode !== "reflex" || audited.has(n)) continue;
+    if (c.mode !== "reflex") continue;
     if ((s1.answers[n]?.confidence ?? 0) < c.thresholds.confidence_floor) reason.set(n, "low_confidence");
     else if (mem.novel) reason.set(n, "novel");
     else if (untrusted(mem, n)) reason.set(n, "unproven_here");
@@ -124,11 +127,26 @@ export async function processRequest(
       final,
       agree: a1 && a2 !== undefined ? same(a1.answer, a2) : undefined,
       correct: isCorrect(n, final, req),
-      audited: audited.has(n),
+      audited: false,
     };
   });
 
+  // Async audit: re-check this alert's reflex decisions with System 2, off the latency path.
+  const reflexNodes = all.filter(([n]) => decisions.find((d) => d.node === n)?.used === "reflex");
+  const audit =
+    reflexNodes.length && Math.random() < AUDIT_RATE
+      ? askSystem2(req, reflexNodes).then((r) =>
+          reflexNodes.map(([n]) => ({
+            node: n,
+            s2: r.answers[n] as Answer,
+            agree: same(s1.answers[n]?.answer, r.answers[n]),
+            suggestion: r.suggestions[n],
+          })),
+        )
+      : undefined;
+
   return {
+    audit,
     seq: req.seq,
     batch: req.batch,
     recall: { available: mem.available, top: mem.top, novel: mem.novel, neighbors: mem.neighbors },

@@ -43,7 +43,7 @@ function tuneFloor(rows: { conf: number; agree: boolean }[], fallback: number) {
 }
 
 export async function runSurge(opts: RunOptions = {}) {
-  const { concurrency = 6, arrivalsPerSec = 3, log = console.log } = opts;
+  const { concurrency = 3, arrivalsPerSec = 4, log = console.log } = opts;
   const db = await getDb();
   if (opts.reset || !(await latestHarness())) await resetAll();
   await ensureVectorIndex(log);
@@ -61,6 +61,7 @@ export async function runSurge(opts: RunOptions = {}) {
   let processed = 0;
   let lastSeq = 0;
   let lastNovelEventSeq = -100;
+  const pending = new Set<Promise<unknown>>();
 
   // Serialize harness changes so versions stay linear.
   let lock = Promise.resolve();
@@ -172,13 +173,14 @@ export async function runSurge(opts: RunOptions = {}) {
       lastSeq = Math.max(lastSeq, res.seq);
       const finals = Object.fromEntries(res.decisions.map((d) => [d.node, d.final])) as Partial<Record<NodeName, Answer>>;
       const agree = Object.fromEntries(res.decisions.filter((d) => d.agree !== undefined).map((d) => [d.node, d.agree]));
-      await db.collection("results").insertOne({
+      // Writes are off the decision path: the alert is already triaged when they start.
+      const writes = Promise.all([db.collection("results").insertOne({
         run_id,
         seq: res.seq,
         batch: res.batch,
         ms: res.ms,
         wait_ms: started - item.arrives,
-        total_ms: Date.now() - item.arrives,
+        total_ms: started - item.arrives + res.ms,
         backlog,
         cost: res.cost,
         correct: res.decisions.filter((d) => d.correct).length / res.decisions.length,
@@ -188,18 +190,50 @@ export async function runSurge(opts: RunOptions = {}) {
         action: actionFor(finals),
         harness_version: res.harness_version,
         ts: res.ts,
-      });
-      await db.collection("decisions").insertMany(res.decisions.map((d) => ({ ...d, run_id, text: item.r.text })));
-      await memory.remember(res.seq, item.r.text, agree);
-      await db.collection("runs").updateOne({ _id: run_id }, { $set: { processed: ++processed } });
+      }),
+        db.collection("decisions").insertMany(res.decisions.map((d) => ({ ...d, run_id, text: item.r.text }))),
+        memory.remember(res.seq, item.r.text, agree),
+        db.collection("runs").updateOne({ _id: run_id }, { $set: { processed: ++processed } }),
+      ]).catch((e) => log(`write failed for #${res.seq}: ${e.message}`));
+      pending.add(writes);
+      void writes.finally(() => pending.delete(writes));
+
       if (res.recall.novel && res.seq - lastNovelEventSeq > 10) {
         lastNovelEventSeq = res.seq;
         void event("novel", null, `alert unlike anything in memory (closest match ${res.recall.top?.toFixed(2)}); reflexes handed it to System 2`, { alert: item.r.text });
       }
       for (const c of g.observe(res, h)) void apply(c);
+
+      // Async audit: when System 2's second opinion arrives, record it and let the graduator judge.
+      if (res.audit) {
+        const seq = res.seq;
+        const version = res.harness_version;
+        const done = res.audit
+          .then(async (updates) => {
+            await writes;
+            await Promise.all(
+              updates.map((u) =>
+                db.collection("decisions").updateOne(
+                  { run_id, seq, node: u.node },
+                  { $set: { s2: u.s2, agree: u.agree, audited: true, ...(u.suggestion ? { suggestion: u.suggestion } : {}) } },
+                ),
+              ),
+            );
+            await db.collection("experience").updateOne(
+              { run_id, seq },
+              { $set: Object.fromEntries(updates.map((u) => [`agree.${u.node}`, u.agree])) },
+            );
+            const late = updates.map((u) => ({ node: u.node, s2: u.s2, agree: u.agree, suggestion: u.suggestion, audited: true, used: "reflex" as const }));
+            for (const c of g.observe({ decisions: late as never, harness_version: version }, h, true)) void apply(c);
+          })
+          .catch((e) => log(`audit failed for #${seq}: ${e.message}`));
+        pending.add(done);
+        void done.finally(() => pending.delete(done));
+      }
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker));
+  while (pending.size) await Promise.all([...pending]);
   await lock;
   await db.collection("runs").updateOne({ _id: run_id }, { $set: { status: "done", finished_at: new Date() } });
   log(`Run done: ${processed} processed, final harness v${h.version}`);

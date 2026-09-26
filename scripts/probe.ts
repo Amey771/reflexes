@@ -2,7 +2,7 @@ import { config } from "dotenv";
 config({ path: ".env.local", quiet: true });
 
 import { readFileSync } from "node:fs";
-import { processRequest } from "../lib/engine";
+import { processRequest, type RequestResult } from "../lib/engine";
 import { initialHarness, NODES, type Request } from "../lib/workload";
 
 // Offline probe (no database): shadow-run N alerts and report System 1 vs System 2 agreement per node.
@@ -14,7 +14,7 @@ async function main() {
   const alerts: Request[] = JSON.parse(readFileSync("data/alerts.json", "utf8")).slice(START, START + N);
   const h = initialHarness();
   const noMemory = async () => ({ available: false, top: null, novel: false, trust: {}, neighbors: [] });
-  const results = [];
+  const results: RequestResult[] = [];
   const queue = [...alerts];
   await Promise.all(
     Array.from({ length: 5 }, async () => {

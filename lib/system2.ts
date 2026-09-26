@@ -49,6 +49,8 @@ export async function askSystem2(req: Request, nodes: [NodeName, NodeConfig][]):
   const { output, usage } = await generateText({
     model: openrouter(MODELS.system2),
     output: Output.object({ schema: schemaFor(nodes) }),
+    // Extended reasoning would make each call ~9 s and blow the budget; answer directly.
+    providerOptions: { openrouter: { reasoning: { enabled: false } } },
     system:
       "You are the triage engine inside a security operations center's AI agent. Think carefully and answer every decision for the alert below.",
     prompt: [

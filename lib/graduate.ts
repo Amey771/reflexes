@@ -9,7 +9,7 @@ export type Change =
 type Window = { shadow: boolean[]; audits: boolean[]; fallbacks: boolean[]; gaps: boolean[]; sinceRewrite: number };
 
 const REWRITE_AFTER = 30; // shadow samples before a stuck node gets its question rewritten
-const REWRITE_BELOW = 0.8;
+const REWRITE_BELOW = 0.85;
 const GAP_WINDOW = 10; // recent System 2 answers checked for "none of the options fit"
 const GAP_MIN = 3;
 
@@ -33,7 +33,8 @@ export class Graduator {
     this.questionSince[node] = version;
   }
 
-  observe(r: RequestResult, h: Harness): Change[] {
+  // `late` = async audit results arriving after the alert was served (don't count them as fallbacks).
+  observe(r: Pick<RequestResult, "decisions" | "harness_version">, h: Harness, late = false): Change[] {
     const changes: Change[] = [];
     for (const d of r.decisions) {
       const n = d.node;
@@ -64,7 +65,7 @@ export class Graduator {
       }
 
       if (mode === "reflex") {
-        w.fallbacks.push(d.used === "fallback");
+        if (!late) w.fallbacks.push(d.used === "fallback");
         if (d.audited && d.agree !== undefined) w.audits.push(d.agree);
         const audits = last(w.audits, 6);
         const fb = last(w.fallbacks, 15);
