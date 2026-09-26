@@ -79,6 +79,8 @@ export async function GET() {
     batch: s.batch,
   }));
 
+  // A finished run never changes, so let the CDN serve it; live runs are never cached.
+  const headers = run.status === "done" ? { "Cache-Control": "public, s-maxage=30, stale-while-revalidate=300" } : { "Cache-Control": "no-store" };
   return Response.json({
     run: { id: String(run_id), status: run.status, processed: run.processed, total: run.total, started_at: run.started_at },
     canRun,
@@ -87,5 +89,5 @@ export async function GET() {
     decisions,
     events: events.map((e) => ({ ...e, _id: String(e._id) })),
     alerts,
-  });
+  }, { headers });
 }
