@@ -39,7 +39,7 @@ Built solo for the MongoDB x Cerebral Valley "Harness Engineering & Model Wrangl
 - Official `mongodb` Node driver 7. Scripts run with `tsx`.
 - Model IDs live in `lib/models.ts`, never inline.
 
-## Layout (planned)
+## Layout
 
 ```text
 app/                    dashboard, plus API routes: /api/state, /api/run
@@ -47,7 +47,6 @@ lib/db.ts               cached MongoClient (one per serverless instance)
 lib/models.ts           model IDs: system2, evolver, jev
 lib/jev.ts              System One client: one fan-out call answers all reflex questions
 lib/system2.ts          LLM teacher: structured answers for all decision points
-lib/harness.ts          load and save harness versions (decision graph + reflex definitions)
 lib/engine.ts           route each decision point: shadow | reflex (+ fallback on low confidence, novelty, unproven-here; audits)
 lib/memory.ts           experience store, auto-embed vector index, $vectorSearch recall and novelty
 lib/graduate.ts         promote, demote, rewrite (incl. taxonomy-gap trigger)
@@ -84,7 +83,7 @@ scripts/jev-smoke.ts    Jev connectivity check
 - Build the smallest thing that works end to end, then improve it. No speculative abstractions, and no test suite beyond the smoke scripts.
 - Commit after each working milestone with a short message.
 - Secrets live in `.env.local` (see `.env.example`). Never read, print or commit them.
-- Ask before `git push`, `vercel --prod`, or anything that deletes data in Atlas.
+- Pushing to `main` as we go is approved. Ask before `vercel --prod` or anything that deletes data in Atlas (the runner's reset of run collections is expected).
 
 ## Commands
 
