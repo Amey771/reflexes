@@ -7,7 +7,7 @@ export const dynamic = "force-dynamic";
 const WINDOW = 20;
 
 // Archived runs live in sibling databases, e.g. /?db=run1 reads "reflexes_run1".
-const ARCHIVES: Record<string, string> = { run1: "reflexes_run1", run2: "reflexes_run2" };
+const ARCHIVES: Record<string, string> = { run1: "reflexes_run1", run2: "reflexes_run2", run3: "reflexes_run3" };
 
 // Alert texts never change, so read them once per server instance (per database).
 const textCache = new Map<string, Map<number, string>>();
