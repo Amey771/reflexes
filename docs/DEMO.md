@@ -36,15 +36,23 @@ Record story mode with `npm run build && npm start`, Chrome at 1440×900, clicki
 
 About 150 words. Rehearse it 3 times with a timer.
 
-## Table demo, 2–3 minutes
+## Table demo, 2–3 minutes: a story told through the real app
 
-1. **Pain, 10 seconds:** the one-breath pitch.
-2. **Hand the judge the keyboard:** "Press → for the next chapter." Letting them drive is the memorable part.
-3. **Chapter 2:** point at one card. "It became a reflex because Jev agreed 100% on the 90% of cases it was confident about. It set that 0.84 threshold itself."
-4. **Chapter 4:** read the alert aloud: *"tried to read ~/.aws/credentials after a prompt-injected README."* Then: "The reflexes weren't sure, and Vector Search found nothing similar in memory, so the LLM handled it."
-5. **Chapter 5:** point at the diff. "The harness wrote this category itself."
-6. **Chapter 6:** give the numbers **and** the accuracy trade without being asked. Volunteering it builds trust.
-7. **Open Details:** "Everything is a MongoDB document. Here's every decision, and every version of the harness."
+The app is a product console (Overview · Decisions · Memory · Harness history · Try it). The demo walks through it as a story: **pain → it learned → it rewrote itself → try it live → the numbers.** Use the Product tour only for the video.
+
+| Step | Where | What you do | What you say |
+| --- | --- | --- | --- |
+| 1 · Pain (15 s) | Overview, run picker on **Run 3** | Point at the decision pipeline | "This is a security team's AI agent. Every alert needs 6 decisions, and normally every one goes to an LLM, forever. This morning, that's where it started." |
+| 2 · It learned (30 s) | **Decisions** | Point at the green ⚡ cards and one threshold | "Reflexes shadowed each decision with Jev. Within 24 alerts, all six became reflexes. Each one set its own confidence threshold: it only acts alone where it agreed 100% with the LLM." |
+| 3 · It rewrote itself (30 s) | **Harness history** | Open the category rewrite at #325 | "Then attacks on AI agents started. The harness had no category for them, so it demoted that reflex, wrote a new category into its own question, and re-learned it. Every version is a MongoDB document." |
+| 4 · Try it live (45 s) | **Try it**, 3 presets | Click **Known attack**, then **Learned today**, then **Never seen** | Known: "Familiar attack: five of six decisions are reflexes, in milliseconds." Learned today: "This morning it had never seen prompt injection. Now it recognizes it, and here are the 3 similar alerts in MongoDB memory it's relying on." Never seen: "Something it has never seen: Vector Search finds nothing close, so all six go to the LLM. It knows what it doesn't know." |
+| 5 · Numbers (15 s) | Overview | Point at the KPI tiles | "2.6× cheaper per alert, 38% of alerts with no LLM call at 257 ms, and a 4-point accuracy trade we show openly." |
+| 6 · Hand over | Try it | Give the judge the keyboard | "Paste any alert you like." |
+
+**Presets (tested live):**
+- *Known attack:* Okta brute force from a Tor exit node against an admin, then success. 5/6 reflex; Attack type handed back (0.52 < its 0.93 threshold). Say "it's honest about the one it's unsure of".
+- *Learned today:* chatbot prompt injection that leaks a Stripe key pattern. Attack type reflex at 1.00; 3 similar campaign alerts in memory.
+- *Never seen:* physical tailgating at a loading dock. Novel (closest match 0.70); all 6 handed to the LLM.
 
 ## Judge Q&A
 
