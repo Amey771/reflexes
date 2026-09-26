@@ -499,7 +499,7 @@ export default function Overview() {
             </>
           )}
           <Link href="/sandbox" className="rounded-full border border-ink-3 px-4 py-2 text-sm font-medium text-ink hover:border-ink">
-            Try one alert
+            Sandbox: try one alert
           </Link>
           {data?.canRun && (
             <button onClick={start} className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-page hover:opacity-90">

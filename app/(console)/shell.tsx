@@ -14,6 +14,7 @@ const NAV = [
   { href: "/memory", label: "Memory", icon: "⌗" },
   { href: "/history", label: "Harness history", icon: "⏱" },
   { href: "/try", label: "Try it", icon: "▶" },
+  { href: "/sandbox", label: "Sandbox", icon: "◇" },
 ];
 
 const RUNS = [
