@@ -171,6 +171,20 @@ function storyLine(e: Ev | undefined): { text: string; color: string; icon: stri
   return { icon: "◎", color: EVENT_COLOR.novel, text: `Vector Search flagged alert #${e.seq} as unlike anything in memory, so reflexes handed it to the LLM.` };
 }
 
+function Clamp({ text, lines = 3, className = "" }: { text: string; lines?: number; className?: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div
+      onClick={() => setOpen(!open)}
+      title={open ? "Click to collapse" : "Click to expand"}
+      className={`cursor-pointer ${className}`}
+      style={open ? undefined : { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" }}
+    >
+      {text}
+    </div>
+  );
+}
+
 function criteriaKeys(q?: Question) {
   if (!q?.criteria) return [];
   return Array.isArray(q.criteria) ? q.criteria : Object.keys(q.criteria);
@@ -190,8 +204,8 @@ function RewriteDiff({ e }: { e: Ev }) {
     <div className="space-y-2 text-sm">
       <div className="text-ink-3">Latest rewrite · v{e.version} · alert #{e.seq}</div>
       <div className="rounded-lg bg-surface-2 p-3">
-        <div className="text-ink-3 line-through decoration-ink-3/60">{bq.instructions}</div>
-        <div className="mt-1 text-ink">{aq.instructions}</div>
+        <Clamp text={bq.instructions} lines={2} className="text-ink-3 line-through decoration-ink-3/60" />
+        <Clamp text={aq.instructions} lines={4} className="mt-2 text-ink" />
       </div>
       {(added.length > 0 || removed.length > 0) && (
         <div className="flex flex-wrap gap-2">
@@ -249,14 +263,24 @@ export default function Dashboard() {
   const series = useMemo(() => data?.series ?? [], [data]);
   const lastSeq = series.length ? series[series.length - 1].seq : 0;
 
+  // URL params: ?replay=1 autoplays, ?at=N freezes on alert N, ?node=<name> opens a node, ?speed=N.
   // On the read-only deployment, a finished run replays itself once on load.
   useEffect(() => {
-    if (!autoReplayed.current && data?.run?.status === "done" && !data.canRun && series.length) {
+    if (autoReplayed.current || !series.length) return;
+    const q = new URLSearchParams(window.location.search);
+    const node = q.get("node");
+    if (node && NODE_ORDER.includes(node)) setSelected(node);
+    if (q.get("speed")) setSpeed(Math.max(1, Number(q.get("speed")) || 1));
+    if (q.get("at")) {
+      autoReplayed.current = true;
+      setCursor(Math.min(Number(q.get("at")) || 0, lastSeq));
+    } else if (q.get("replay") === "1" || (data?.run?.status === "done" && !data?.canRun)) {
+      if (data?.run?.status !== "done" && q.get("replay") !== "1") return;
       autoReplayed.current = true;
       setCursor(0);
       setPlaying(true);
     }
-  }, [data, series.length]);
+  }, [data, series.length, lastSeq]);
 
   // Replay: advance the cursor, pausing briefly on each key moment so its story line can be read.
   const keySeqs = useMemo(() => {
@@ -418,7 +442,7 @@ export default function Dashboard() {
         <>
           <div className="flex items-center gap-3 rounded-xl border border-line bg-surface-1 px-5 py-3 text-lg">
             <span aria-hidden style={{ color: story.color }}>{story.icon}</span>
-            <span className="text-ink">{story.text}</span>
+            <span className="text-ink" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{story.text}</span>
           </div>
 
           <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
@@ -444,7 +468,7 @@ export default function Dashboard() {
               <div className="mt-4 grid gap-6 rounded-xl border border-line bg-surface-1 p-4 md:grid-cols-3">
                 <div>
                   <div className="text-sm text-ink-3">Reflex question sent to Jev ({selCfg.question.type})</div>
-                  <div className="mt-1 text-ink">{selCfg.question.instructions}</div>
+                  <Clamp text={selCfg.question.instructions} lines={4} className="mt-1 text-ink" />
                   {selCfg.question.criteria && (
                     <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
                       {criteriaKeys(selCfg.question).map((c) => (
