@@ -93,7 +93,11 @@ export async function GET(req: Request) {
     run: { id: String(run_id), status: run.status, processed: run.processed, total: run.total, started_at: run.started_at },
     canRun,
     versions,
-    series: series.map(({ action: _a, ...rest }: Document) => rest),
+    series: series.map((point: Document) => {
+      const rest = { ...point };
+      delete rest.action; // sent once, in `alerts`
+      return rest;
+    }),
     decisions,
     events: events.map((e) => ({ ...e, _id: String(e._id) })),
     alerts,

@@ -243,13 +243,36 @@ export default function Dashboard() {
   useEffect(() => {
     let alive = true;
     let timer: ReturnType<typeof setTimeout>;
+    // URL params, applied once when the first run arrives: ?replay=1 autoplays, ?at=N freezes on
+    // alert N, ?node=<name> opens a node, ?speed=N. On the read-only deployment, a finished run
+    // replays itself once on load.
+    const applyStartParams = (p: Payload) => {
+      if (autoReplayed.current || !p.series?.length) return;
+      const q = new URLSearchParams(window.location.search);
+      const last = p.series[p.series.length - 1].seq;
+      const node = q.get("node");
+      if (node && NODE_ORDER.includes(node)) setSelected(node);
+      if (q.get("speed")) setSpeed(Math.max(1, Number(q.get("speed")) || 1));
+      if (q.get("at")) {
+        autoReplayed.current = true;
+        setCursor(Math.min(Number(q.get("at")) || 0, last));
+      } else if (q.get("replay") === "1" || (p.run?.status === "done" && !p.canRun)) {
+        autoReplayed.current = true;
+        setCursor(0);
+        setPlaying(true);
+      }
+    };
     const tick = async () => {
       if (!inFlight.current) {
         inFlight.current = true;
         try {
           const db = new URLSearchParams(window.location.search).get("db");
           const r = await fetch(db ? `/api/state?db=${encodeURIComponent(db)}` : "/api/state", { cache: "no-store" });
-          if (alive && r.ok) setData(await r.json());
+          if (alive && r.ok) {
+            const p: Payload = await r.json();
+            setData(p);
+            applyStartParams(p);
+          }
         } catch {}
         inFlight.current = false;
       }
@@ -264,25 +287,6 @@ export default function Dashboard() {
 
   const series = useMemo(() => data?.series ?? [], [data]);
   const lastSeq = series.length ? series[series.length - 1].seq : 0;
-
-  // URL params: ?replay=1 autoplays, ?at=N freezes on alert N, ?node=<name> opens a node, ?speed=N.
-  // On the read-only deployment, a finished run replays itself once on load.
-  useEffect(() => {
-    if (autoReplayed.current || !series.length) return;
-    const q = new URLSearchParams(window.location.search);
-    const node = q.get("node");
-    if (node && NODE_ORDER.includes(node)) setSelected(node);
-    if (q.get("speed")) setSpeed(Math.max(1, Number(q.get("speed")) || 1));
-    if (q.get("at")) {
-      autoReplayed.current = true;
-      setCursor(Math.min(Number(q.get("at")) || 0, lastSeq));
-    } else if (q.get("replay") === "1" || (data?.run?.status === "done" && !data?.canRun)) {
-      if (data?.run?.status !== "done" && q.get("replay") !== "1") return;
-      autoReplayed.current = true;
-      setCursor(0);
-      setPlaying(true);
-    }
-  }, [data, series.length, lastSeq]);
 
   // Replay: advance the cursor, pausing briefly on each key moment so its story line can be read.
   const keySeqs = useMemo(() => {
