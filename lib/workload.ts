@@ -78,7 +78,7 @@ const DEFAULT_THRESHOLDS: NodeConfig["thresholds"] = {
   confidence_floor: 0.6,
   audit_rate: 0.15,
   demote_agreement: 0.75,
-  max_fallback_rate: 0.35,
+  max_fallback_rate: 0.55, // promotion allows up to 40% low-confidence cases, so only demote well above that
 };
 
 export const CATEGORIES: Record<string, string> = {
@@ -171,7 +171,7 @@ export function initialHarness(): Harness {
         question: {
           type: "noul",
           instructions:
-            "SOC auto-remediation policy: may the response run automatically, without human approval? Always yes for false positives. For real events, yes only if ALL of these hold: asset_criticality is low, user_privileged is false, and it is not a breach type (malware, credential compromise, data exfiltration, attack on an AI agent) on a high-criticality asset or privileged user. Otherwise no.",
+            "SOC auto-remediation policy: may the response run automatically, without human approval? Yes if the alert is a false positive. Otherwise yes exactly when context.auto_fix_eligible is true (low-criticality asset and non-privileged user). Otherwise no.",
         },
       },
     },
@@ -215,10 +215,15 @@ export function actionFor(d: Partial<Record<NodeName, Answer>>): string {
   return d.auto_ok ? `Auto-ran ${pb}` : `Queued ${pb} for approval`;
 }
 
+// The SOC's systems also compute the auto-fix eligibility flag, so no model has to combine facts.
+export function contextFacts(req: Request) {
+  return { ...req.facts, auto_fix_eligible: req.facts.asset_criticality === "low" && !req.facts.user_privileged };
+}
+
 // Context policy: build the state each node's reflex sees.
 export function stateFor(req: Request, fields: ContextField[]) {
   const s: Record<string, unknown> = {};
   if (fields.includes("text")) s.alert = req.text;
-  if (fields.includes("facts")) s.context = req.facts;
+  if (fields.includes("facts")) s.context = contextFacts(req);
   return s;
 }

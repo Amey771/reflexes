@@ -10,10 +10,10 @@ export const VECTOR_INDEX = "experience_text";
 const EMBED_MODEL = "voyage-4-lite";
 const K = 5;
 const WARMUP = 30; // experiences before novelty detection starts
-const NOVEL_PERCENTILE = 0.1; // novel = closest match below the 10th percentile of recent matches
+const NOVEL_PERCENTILE = 0.05; // novel = closest match below the 5th percentile of recent matches
 const NOVEL_WINDOW = 150;
-const TRUST_MIN = 0.6; // share of similar past cases where this reflex agreed with the teacher
-const TRUST_MIN_CASES = 2;
+const TRUST_MIN = 0.5; // share of similar past cases where this reflex agreed with the teacher
+const TRUST_MIN_CASES = 3;
 
 export type Recall = {
   available: boolean;

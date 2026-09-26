@@ -2,14 +2,30 @@ import type { RequestResult } from "./engine";
 import { NODES, type Harness, type NodeName } from "./workload";
 
 export type Change =
-  | { type: "promote"; node: NodeName; detail: string }
+  | { type: "promote"; node: NodeName; detail: string; floor: number }
   | { type: "demote"; node: NodeName; detail: string }
   | { type: "rewrite"; node: NodeName; detail: string };
 
-type Window = { shadow: boolean[]; audits: boolean[]; fallbacks: boolean[]; gaps: boolean[]; sinceRewrite: number };
+type Sample = { agree: boolean; conf: number };
+type Window = { shadow: Sample[]; audits: boolean[]; fallbacks: boolean[]; gaps: boolean[]; sinceRewrite: number };
 
-const REWRITE_AFTER = 30; // shadow samples before a stuck node gets its question rewritten
+const REWRITE_AFTER = 20; // shadow samples before a stuck node gets its question rewritten
 const REWRITE_BELOW = 0.85;
+const FLOOR_AGREEMENT = 0.95; // a reflex must agree with the teacher this often on the cases it would handle
+const MIN_COVERAGE = 0.6; // ...and handle at least this share of cases itself
+
+// Promotion on what the reflex would actually do: the lowest confidence floor at which agreement on
+// cases at or above the floor is >= FLOOR_AGREEMENT while covering >= MIN_COVERAGE of cases.
+export function calibratedFloor(samples: Sample[]) {
+  const sorted = [...samples].sort((a, b) => a.conf - b.conf);
+  for (let i = 0; i <= sorted.length * (1 - MIN_COVERAGE); i++) {
+    const above = sorted.slice(i);
+    const agreement = above.filter((s) => s.agree).length / above.length;
+    if (agreement >= FLOOR_AGREEMENT)
+      return { floor: Math.max(0.5, sorted[i].conf), coverage: above.length / sorted.length, agreement };
+  }
+  return null;
+}
 const GAP_WINDOW = 10; // recent System 2 answers checked for "none of the options fit"
 const GAP_MIN = 3;
 
@@ -53,26 +69,34 @@ export class Graduator {
         }
       }
 
-      if (mode === "shadow" && d.agree !== undefined) {
-        w.shadow.push(d.agree);
+      if (mode === "shadow" && d.agree !== undefined && d.s1) {
+        w.shadow.push({ agree: d.agree, conf: d.s1.confidence });
         w.sinceRewrite++;
         const recent = last(w.shadow, t.min_samples);
-        if (recent.length >= t.min_samples && rate(recent) >= t.promote_agreement) {
-          changes.push({ type: "promote", node: n, detail: `agreement ${pct(rate(recent))} over ${recent.length} decisions` });
-        } else if (w.sinceRewrite >= REWRITE_AFTER && rate(last(w.shadow, REWRITE_AFTER)) < REWRITE_BELOW) {
-          changes.push({ type: "rewrite", node: n, detail: `stuck at ${pct(rate(last(w.shadow, REWRITE_AFTER)))} agreement` });
+        const cal = recent.length >= t.min_samples ? calibratedFloor(recent) : null;
+        const plain = rate(recent.map((s) => s.agree));
+        if (cal) {
+          changes.push({
+            type: "promote",
+            node: n,
+            floor: cal.floor,
+            detail: `agrees ${pct(cal.agreement)} on the ${pct(cal.coverage)} of cases it is confident about (floor ${cal.floor.toFixed(2)})`,
+          });
+        } else if (w.sinceRewrite >= REWRITE_AFTER && plain < REWRITE_BELOW) {
+          changes.push({ type: "rewrite", node: n, detail: `stuck at ${pct(plain)} agreement` });
         }
       }
 
       if (mode === "reflex") {
-        if (!late) w.fallbacks.push(d.used === "fallback");
+        // Only low-confidence fallbacks are the reflex's own fault; novelty and memory fallbacks aren't.
+        if (!late) w.fallbacks.push(d.fallback_reason === "low_confidence");
         if (d.audited && d.agree !== undefined) w.audits.push(d.agree);
         const audits = last(w.audits, 6);
         const fb = last(w.fallbacks, 15);
         if (audits.length >= 4 && rate(audits) < t.demote_agreement) {
           changes.push({ type: "demote", node: n, detail: `audit agreement fell to ${pct(rate(audits))}` });
         } else if (fb.length >= 10 && rate(fb) > t.max_fallback_rate) {
-          changes.push({ type: "demote", node: n, detail: `confidence collapsed: ${pct(rate(fb))} of recent decisions fell back` });
+          changes.push({ type: "demote", node: n, detail: `confidence collapsed: ${pct(rate(fb))} of recent decisions were low-confidence` });
         }
       }
     }

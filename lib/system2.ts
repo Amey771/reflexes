@@ -2,7 +2,7 @@ import { generateText, Output } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { z } from "zod";
 import { MODELS, PRICE } from "./models";
-import type { Answer, NodeConfig, NodeName, Request } from "./workload";
+import { contextFacts, type Answer, type NodeConfig, type NodeName, type Request } from "./workload";
 
 const openrouter = createOpenRouter({ apiKey: process.env.OPENROUTER_API_KEY });
 
@@ -55,7 +55,7 @@ export async function askSystem2(req: Request, nodes: [NodeName, NodeConfig][]):
       "You are the triage engine inside a security operations center's AI agent. Think carefully and answer every decision for the alert below.",
     prompt: [
       `Alert:\n${req.text}`,
-      `Context (computed by the SOC's own systems, trust it):\n${JSON.stringify(req.facts)}`,
+      `Context (computed by the SOC's own systems, trust it):\n${JSON.stringify(contextFacts(req))}`,
       `Decisions:\n${nodes.map(([n, c]) => describe(n, c)).join("\n")}`,
     ].join("\n\n"),
   });

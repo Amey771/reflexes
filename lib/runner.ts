@@ -15,7 +15,6 @@ export type RunOptions = {
 };
 
 const MAX_REWRITES_PER_NODE = 2;
-const FLOOR_TARGET = 0.95; // agreement the self-tuned confidence floor must guarantee
 
 export async function latestHarness(): Promise<Harness | null> {
   const db = await getDb();
@@ -30,16 +29,6 @@ export async function resetAll() {
   await db.collection("harness_versions").insertOne(initialHarness());
   await db.collection("decisions").createIndex({ run_id: 1, node: 1, seq: -1 });
   await db.collection("results").createIndex({ run_id: 1, seq: 1 });
-}
-
-// Lowest Jev confidence above which shadow agreement stays >= FLOOR_TARGET (covering >= half the cases).
-function tuneFloor(rows: { conf: number; agree: boolean }[], fallback: number) {
-  const sorted = [...rows].sort((a, b) => a.conf - b.conf);
-  for (let i = 0; i <= sorted.length / 2; i++) {
-    const above = sorted.slice(i);
-    if (above.filter((r) => r.agree).length / above.length >= FLOOR_TARGET) return Math.min(0.95, Math.max(0.5, sorted[i].conf));
-  }
-  return fallback;
 }
 
 export async function runSurge(opts: RunOptions = {}) {
@@ -127,20 +116,12 @@ export async function runSurge(opts: RunOptions = {}) {
     return withLock(async () => {
       const mode = h.nodes[c.node].mode;
       if (c.type === "promote" && mode === "shadow") {
-        const rows = await db
-          .collection("decisions")
-          .find({ run_id, node: c.node, harness_version: { $gte: g.questionSince[c.node] }, agree: { $in: [true, false] } })
-          .project<{ s1: { confidence: number }; agree: boolean }>({ s1: 1, agree: 1 })
-          .toArray();
-        const floor = tuneFloor(
-          rows.filter((r) => typeof r.s1?.confidence === "number").map((r) => ({ conf: r.s1.confidence, agree: r.agree })),
-          h.nodes[c.node].thresholds.confidence_floor,
-        );
+        const floor = c.floor; // self-tuned from calibration data by the graduator
         await newVersion((nh) => {
           nh.nodes[c.node].mode = "reflex";
           nh.nodes[c.node].thresholds.confidence_floor = floor;
         }, `Promoted ${c.node} to reflex: ${c.detail}`);
-        await event("promote", c.node, `${c.detail}; confidence floor self-set to ${floor.toFixed(2)}`);
+        await event("promote", c.node, c.detail);
       } else if (c.type === "demote" && mode === "reflex") {
         await newVersion((nh) => void (nh.nodes[c.node].mode = "shadow"), `Demoted ${c.node}: ${c.detail}`);
         g.reset(c.node, h.version);
