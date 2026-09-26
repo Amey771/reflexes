@@ -158,8 +158,8 @@ export default function Story() {
         <h1 className="text-3xl font-bold tracking-tight">
           Reflexes <span className="font-normal text-ink-2">· agents that grow reflexes</span>
         </h1>
-        <Link href={`/details?db=${STORY_DB}&at=${cursor}`} className="rounded-full border border-line bg-surface-1 px-4 py-2 text-sm text-ink-2 hover:border-ink-3">
-          Details →
+        <Link href={`/?db=${STORY_DB}&at=${cursor}`} className="rounded-full border border-line bg-surface-1 px-4 py-2 text-sm text-ink-2 hover:border-ink-3">
+          Open the console →
         </Link>
       </header>
 
