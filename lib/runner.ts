@@ -3,15 +3,19 @@ import { getDb } from "./db";
 import { processRequest, type RequestResult } from "./engine";
 import { rewriteQuestion, type Example } from "./evolve";
 import { Graduator, type Change } from "./graduate";
-import { initialHarness, NODES, type Harness, type NodeName, type Request } from "./workload";
+import { ensureVectorIndex, Memory } from "./memory";
+import { actionFor, initialHarness, NODES, type Answer, type Harness, type NodeName, type Request } from "./workload";
 
 export type RunOptions = {
   limit?: number;
   concurrency?: number;
-  arrivalsPerSec?: number; // customers arrive at a fixed rate; a slow agent builds a queue
+  arrivalsPerSec?: number; // alerts arrive at a fixed rate; a slow agent builds a queue
   reset?: boolean;
   log?: (msg: string) => void;
 };
+
+const MAX_REWRITES_PER_NODE = 3;
+const FLOOR_TARGET = 0.95; // agreement the self-tuned confidence floor must guarantee
 
 export async function latestHarness(): Promise<Harness | null> {
   const db = await getDb();
@@ -20,32 +24,43 @@ export async function latestHarness(): Promise<Harness | null> {
 
 export async function resetAll() {
   const db = await getDb();
-  await Promise.all(["decisions", "results", "events", "harness_versions", "runs"].map((c) => db.collection(c).deleteMany({})));
+  await Promise.all(
+    ["decisions", "results", "events", "harness_versions", "runs", "experience"].map((c) => db.collection(c).deleteMany({})),
+  );
   await db.collection("harness_versions").insertOne(initialHarness());
   await db.collection("decisions").createIndex({ run_id: 1, node: 1, seq: -1 });
   await db.collection("results").createIndex({ run_id: 1, seq: 1 });
+}
+
+// Lowest Jev confidence above which shadow agreement stays >= FLOOR_TARGET (covering >= half the cases).
+function tuneFloor(rows: { conf: number; agree: boolean }[], fallback: number) {
+  const sorted = [...rows].sort((a, b) => a.conf - b.conf);
+  for (let i = 0; i <= sorted.length / 2; i++) {
+    const above = sorted.slice(i);
+    if (above.filter((r) => r.agree).length / above.length >= FLOOR_TARGET) return Math.min(0.95, Math.max(0.5, sorted[i].conf));
+  }
+  return fallback;
 }
 
 export async function runSurge(opts: RunOptions = {}) {
   const { concurrency = 6, arrivalsPerSec = 3, log = console.log } = opts;
   const db = await getDb();
   if (opts.reset || !(await latestHarness())) await resetAll();
+  await ensureVectorIndex(log);
 
   let h = (await latestHarness())!;
-  const requests = await db
-    .collection<Request>("requests")
-    .find()
-    .sort({ seq: 1 })
-    .limit(opts.limit ?? 10_000)
-    .toArray();
+  const requests = await db.collection<Request>("requests").find().sort({ seq: 1 }).limit(opts.limit ?? 10_000).toArray();
   const run_id = new ObjectId();
+  const memory = new Memory(run_id, log);
   const startedAt = Date.now();
   await db.collection("runs").insertOne({ _id: run_id, status: "running", started_at: new Date(), total: requests.length, processed: 0 });
-  log(`Run ${run_id}: ${requests.length} requests, ${arrivalsPerSec}/s arrivals, concurrency ${concurrency}`);
+  log(`Run ${run_id}: ${requests.length} alerts, ${arrivalsPerSec}/s arrivals, concurrency ${concurrency}`);
 
   const g = new Graduator();
+  const rewrites = Object.fromEntries(NODES.map((n) => [n, 0])) as Record<NodeName, number>;
   let processed = 0;
   let lastSeq = 0;
+  let lastNovelEventSeq = -100;
 
   // Serialize harness changes so versions stay linear.
   let lock = Promise.resolve();
@@ -61,38 +76,47 @@ export async function runSurge(opts: RunOptions = {}) {
     nh.created_at = new Date();
     await db.collection("harness_versions").insertOne(nh);
     h = nh;
-    return nh;
   }
 
-  async function event(type: string, node: NodeName, detail: string, extra: Record<string, unknown> = {}) {
+  async function event(type: string, node: NodeName | null, detail: string, extra: Record<string, unknown> = {}) {
     await db.collection("events").insertOne({ run_id, type, node, detail, version: h.version, seq: lastSeq, ts: new Date(), ...extra });
-    log(`[v${h.version}] ${type.toUpperCase()} ${node}: ${detail}`);
+    log(`[v${h.version}] ${type.toUpperCase()} ${node ?? ""}: ${detail}`);
   }
 
   async function rewrite(node: NodeName, why: string) {
+    if (rewrites[node] >= MAX_REWRITES_PER_NODE) return;
+    rewrites[node]++;
     g.busy.add(node);
     try {
-      const rows = await db
+      if (h.nodes[node].mode === "reflex") {
+        await newVersion((nh) => void (nh.nodes[node].mode = "shadow"), `Demoted ${node}: ${why}`);
+        await event("demote", node, why);
+      }
+      // Recent problem cases, plus the Vector Search cluster around the newest one.
+      const recent = await db
         .collection("decisions")
-        .find({ run_id, node, $or: [{ agree: false }, { used: "fallback" }] })
+        .find({ run_id, node, $or: [{ agree: false }, { used: "fallback" }, { suggestion: { $exists: true, $ne: null } }] })
         .sort({ seq: -1 })
-        .limit(15)
+        .limit(10)
         .toArray();
-      const examples: Example[] = rows.map((d) => ({
-        text: d.text,
-        s1: d.s1?.answer,
-        confidence: d.s1?.confidence,
-        s2: d.s2,
-        suggestion: d.suggestion,
-      }));
-      const before = h.nodes[node].question;
-      const { question, reason } = await rewriteQuestion(node, h.nodes[node], examples, why);
+      const cluster = recent[0] ? await memory.similarSeqs(recent[0].text, 12) : [];
+      const clustered = cluster.length
+        ? await db.collection("decisions").find({ run_id, node, seq: { $in: cluster } }).toArray()
+        : [];
+      const seen = new Set<number>();
+      const examples: Example[] = [...recent, ...clustered]
+        .filter((d) => (seen.has(d.seq) ? false : (seen.add(d.seq), true)))
+        .map((d) => ({ text: d.text, s1: d.s1?.answer, confidence: d.s1?.confidence, s2: d.s2, suggestion: d.suggestion }));
+
+      const before = { question: h.nodes[node].question, context: h.nodes[node].context };
+      const { question, context, reason } = await rewriteQuestion(node, h.nodes[node], examples, why);
       await newVersion((nh) => {
         nh.nodes[node].question = question;
+        nh.nodes[node].context = context;
         nh.nodes[node].mode = "shadow";
       }, `Rewrote ${node}: ${reason}`);
       g.reset(node, h.version);
-      await event("rewrite", node, reason, { before, after: question });
+      await event("rewrite", node, reason, { before, after: { question, context }, cluster_size: clustered.length });
     } finally {
       g.busy.delete(node);
     }
@@ -102,20 +126,32 @@ export async function runSurge(opts: RunOptions = {}) {
     return withLock(async () => {
       const mode = h.nodes[c.node].mode;
       if (c.type === "promote" && mode === "shadow") {
-        await newVersion((nh) => void (nh.nodes[c.node].mode = "reflex"), `Promoted ${c.node} to reflex: ${c.detail}`);
-        await event("promote", c.node, c.detail);
+        const rows = await db
+          .collection("decisions")
+          .find({ run_id, node: c.node, harness_version: { $gte: g.questionSince[c.node] }, agree: { $in: [true, false] } })
+          .project<{ s1: { confidence: number }; agree: boolean }>({ s1: 1, agree: 1 })
+          .toArray();
+        const floor = tuneFloor(
+          rows.filter((r) => typeof r.s1?.confidence === "number").map((r) => ({ conf: r.s1.confidence, agree: r.agree })),
+          h.nodes[c.node].thresholds.confidence_floor,
+        );
+        await newVersion((nh) => {
+          nh.nodes[c.node].mode = "reflex";
+          nh.nodes[c.node].thresholds.confidence_floor = floor;
+        }, `Promoted ${c.node} to reflex: ${c.detail}`);
+        await event("promote", c.node, `${c.detail}; confidence floor self-set to ${floor.toFixed(2)}`);
       } else if (c.type === "demote" && mode === "reflex") {
         await newVersion((nh) => void (nh.nodes[c.node].mode = "shadow"), `Demoted ${c.node}: ${c.detail}`);
         g.reset(c.node, h.version);
         await event("demote", c.node, c.detail);
         void withLock(() => rewrite(c.node, `Demoted after drift: ${c.detail}`));
-      } else if (c.type === "rewrite" && mode === "shadow") {
+      } else if (c.type === "rewrite") {
         await rewrite(c.node, c.detail);
       }
     });
   }
 
-  // Arrivals: request i arrives at i / arrivalsPerSec seconds after start.
+  // Arrivals: alert i arrives at i / arrivalsPerSec seconds after start.
   const queue = requests.map((r, i) => ({ r, arrives: startedAt + (i * 1000) / arrivalsPerSec }));
   async function worker() {
     while (queue.length) {
@@ -127,15 +163,15 @@ export async function runSurge(opts: RunOptions = {}) {
       let res: RequestResult | null = null;
       for (let attempt = 0; attempt < 2 && !res; attempt++) {
         try {
-          res = await processRequest(item.r, h);
+          res = await processRequest(item.r, h, (t) => memory.recall(t));
         } catch (e) {
           log(`seq ${item.r.seq} failed: ${(e as Error).message}`);
         }
       }
       if (!res) continue;
       lastSeq = Math.max(lastSeq, res.seq);
-      const correct = res.decisions.filter((d) => d.correct).length / res.decisions.length;
-      const reflexShare = res.decisions.filter((d) => d.used === "reflex").length / res.decisions.length;
+      const finals = Object.fromEntries(res.decisions.map((d) => [d.node, d.final])) as Partial<Record<NodeName, Answer>>;
+      const agree = Object.fromEntries(res.decisions.filter((d) => d.agree !== undefined).map((d) => [d.node, d.agree]));
       await db.collection("results").insertOne({
         run_id,
         seq: res.seq,
@@ -145,13 +181,21 @@ export async function runSurge(opts: RunOptions = {}) {
         total_ms: Date.now() - item.arrives,
         backlog,
         cost: res.cost,
-        correct,
-        reflex_share: reflexShare,
+        correct: res.decisions.filter((d) => d.correct).length / res.decisions.length,
+        reflex_share: res.decisions.filter((d) => d.used === "reflex").length / res.decisions.length,
+        recall_top: res.recall.top,
+        novel: res.recall.novel,
+        action: actionFor(finals),
         harness_version: res.harness_version,
         ts: res.ts,
       });
       await db.collection("decisions").insertMany(res.decisions.map((d) => ({ ...d, run_id, text: item.r.text })));
+      await memory.remember(res.seq, item.r.text, agree);
       await db.collection("runs").updateOne({ _id: run_id }, { $set: { processed: ++processed } });
+      if (res.recall.novel && res.seq - lastNovelEventSeq > 10) {
+        lastNovelEventSeq = res.seq;
+        void event("novel", null, `alert unlike anything in memory (closest match ${res.recall.top?.toFixed(2)}); reflexes handed it to System 2`, { alert: item.r.text });
+      }
       for (const c of g.observe(res, h)) void apply(c);
     }
   }

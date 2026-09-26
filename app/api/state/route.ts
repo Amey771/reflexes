@@ -44,19 +44,19 @@ export async function GET() {
       ])
       .toArray(),
     db.collection("events").find({ run_id }).sort({ ts: -1 }).limit(40).toArray(),
-    db
-      .collection("decisions")
-      .aggregate([
-        { $match: { run_id } },
-        { $sort: { seq: -1 } },
-        { $limit: 60 },
-        { $group: { _id: "$seq", text: { $first: "$text" }, nodes: { $push: { node: "$node", used: "$used", correct: "$correct" } } } },
-        { $sort: { _id: -1 } },
-        { $limit: 8 },
-      ])
-      .toArray(),
+    db.collection("results").find({ run_id }).sort({ seq: -1 }).limit(8).project({ _id: 0, seq: 1, action: 1, novel: 1, recall_top: 1, batch: 1 }).toArray(),
     db.collection("harness_versions").countDocuments(),
   ]);
+
+  const recentDecisions = await db
+    .collection("decisions")
+    .find({ run_id, seq: { $in: recent.map((r) => r.seq) } })
+    .project({ _id: 0, seq: 1, node: 1, used: 1, correct: 1, text: 1, fallback_reason: 1 })
+    .toArray();
+  const recentRows = recent.map((r) => {
+    const ds = recentDecisions.filter((d) => d.seq === r.seq);
+    return { ...r, text: ds[0]?.text ?? "", nodes: ds.map((d) => ({ node: d.node, used: d.used, correct: d.correct, reason: d.fallback_reason })) };
+  });
 
   const nodes = Object.fromEntries(
     NODES.map((n) => {
@@ -96,6 +96,6 @@ export async function GET() {
     nodes,
     series: bySeq,
     events,
-    recent,
+    recent: recentRows,
   });
 }

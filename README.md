@@ -8,14 +8,17 @@
 
 ## The problem
 
-When you learned to drive, you thought hard about every mirror check. A year later it was reflex. AI agents never make that jump. Every small decision, like what a request is about, which tool to call, or whether a reply is good enough, goes through a slow, expensive LLM call, forever. At production volume that means seconds of latency and a bill that grows with every request.
+When you learned to drive, you thought hard about every mirror check. A year later it was reflex. AI agents never make that jump. Every small decision, like what kind of alert this is, how severe it is, or which playbook to run, goes through a slow, expensive LLM call, forever. During an alert storm that means a queue, and a real intrusion waiting in line behind hundreds of noisy alerts.
+
+Demo workload: a security operations center (SOC) agent triaging an alert storm, with six decisions per alert. Midway through, a new attack campaign (attacks on the company's own AI agents) appears.
 
 ## What Reflexes does
 
 1. **Shadow.** Every decision point runs on a System 2 LLM and, in parallel, on Jev, TypeSafe AI's System One model. Every outcome is stored in MongoDB.
-2. **Graduate.** When a decision point's agreement is high enough, it becomes a ~100 ms reflex. The LLM is only used when Jev isn't confident.
-3. **Audit.** A small sample of reflex decisions is re-checked by the LLM.
-4. **Demote and rewrite.** When the world changes and a reflex drifts, it's demoted. The evolver rewrites the reflex's question from the disagreement examples, and it graduates again.
+2. **Graduate.** When a decision point's agreement is high enough, it becomes a ~100 ms reflex, with a confidence floor the harness sets for itself from Jev's calibration.
+3. **Recall before acting.** Atlas Vector Search pulls the most similar past alerts from experience memory. A reflex fires only if the alert isn't novel and the reflex proved reliable on those similar cases. Otherwise System 2 decides.
+4. **Audit.** A small sample of reflex decisions is re-checked by the LLM.
+5. **Demote and rewrite.** When the world changes, the reflex is demoted. The evolver rewrites its question (adding categories the teacher keeps proposing) and its context policy, using a Vector Search cluster of the problem cases, and it graduates again.
 
 TODO: confirm against the final build.
 
@@ -30,7 +33,7 @@ TODO: latency, cost per request and accuracy before and after, the graduation ti
 | Documents | The harness itself (decision graph, reflex questions, thresholds) is a versioned document with lineage |
 | Decision memory | Every S1 and S2 decision is stored and becomes the experience that reflexes are learned from |
 | Aggregation pipelines | Rolling agreement per decision point drives promotion and demotion, plus the dashboard |
-| Vector Search | The evolver retrieves similar disagreements when rewriting a reflex |
+| Vector Search (Automated Embedding) | Recall before every reflex: novelty detection and "proven on similar alerts" trust, plus the evolver's example cluster |
 
 TODO: confirm once built.
 

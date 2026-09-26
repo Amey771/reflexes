@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { NODE_LABEL as LABELS, NODES } from "@/lib/workload";
 
 type NodeState = {
   mode: "shadow" | "reflex";
@@ -12,7 +13,7 @@ type NodeState = {
   confidence: number | null;
 };
 type Point = { seq: number; batch: string; ms: number; wait: number; cost: number; accuracy: number; reflex: number };
-type Ev = { _id: string; type: "promote" | "demote" | "rewrite"; node: string; detail: string; version: number; seq: number; ts: string; before?: unknown; after?: unknown };
+type Ev = { _id: string; type: "promote" | "demote" | "rewrite" | "novel"; node: string | null; detail: string; version: number; seq: number; ts: string; before?: unknown; after?: unknown };
 type Kpi = { ms: number | null; wait: number | null; cost: number | null; accuracy: number | null; reflex: number | null };
 type State = {
   run: { status: string; processed: number; total: number } | null;
@@ -21,18 +22,11 @@ type State = {
   nodes?: Record<string, NodeState>;
   series?: Point[];
   events?: Ev[];
-  recent?: { _id: number; text: string; nodes: { node: string; used: string; correct: boolean }[] }[];
+  recent?: { seq: number; text: string; action: string; novel: boolean; batch: string; nodes: { node: string; used: string; correct: boolean; reason?: string }[] }[];
 };
 
-const NODE_ORDER = ["intent", "urgency", "needs_human", "tool", "policy_ok", "reply_ok"];
-const NODE_LABEL: Record<string, string> = {
-  intent: "Intent",
-  urgency: "Urgency",
-  needs_human: "Needs human?",
-  tool: "Which tool",
-  policy_ok: "Policy allows?",
-  reply_ok: "Reply safe?",
-};
+const NODE_ORDER: string[] = [...NODES];
+const NODE_LABEL: Record<string, string> = LABELS;
 
 const fmtMs = (v: number | null | undefined) => (v == null ? "–" : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`);
 const fmtPct = (v: number | null | undefined) => (v == null ? "–" : `${Math.round(v * 100)}%`);
@@ -108,16 +102,16 @@ function Chart({ title, data, lines, fmt, events, launchSeq, domain }: {
             <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" vertical={false} />
             <XAxis dataKey="seq" type="number" domain={["dataMin", "dataMax"]} tick={{ fill: "var(--text-muted)", fontSize: 12 }} stroke="var(--border)" />
             <YAxis tickFormatter={fmt} domain={domain} tick={{ fill: "var(--text-muted)", fontSize: 12 }} stroke="var(--border)" width={56} />
-            <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmt(Number(v))} labelFormatter={(l) => `Request #${l}`} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmt(Number(v))} labelFormatter={(l) => `Alert #${l}`} />
             {lines.length > 1 && <Legend wrapperStyle={{ color: "var(--text-secondary)", fontSize: 12 }} />}
             {launchSeq != null && (
-              <ReferenceLine x={launchSeq} stroke="var(--text-muted)" strokeDasharray="4 4" label={{ value: "Gift card launch", fill: "var(--text-secondary)", fontSize: 11, position: "insideTopLeft" }} />
+              <ReferenceLine x={launchSeq} stroke="var(--text-muted)" strokeDasharray="4 4" label={{ value: "New campaign: attacks on AI agents", fill: "var(--text-secondary)", fontSize: 11, position: "insideTopLeft" }} />
             )}
             {events.map((e) => (
               <ReferenceLine
                 key={e._id}
                 x={e.seq}
-                stroke={e.type === "promote" ? "var(--status-good)" : e.type === "demote" ? "var(--status-critical)" : "var(--thinking)"}
+                stroke={e.type === "promote" ? "var(--status-good)" : e.type === "demote" ? "var(--status-critical)" : e.type === "novel" ? "var(--status-warning)" : "var(--thinking)"}
                 strokeOpacity={0.5}
                 strokeDasharray={e.type === "rewrite" ? "2 3" : undefined}
               />
@@ -136,6 +130,7 @@ const EVENT_STYLE = {
   promote: { icon: "⚡", label: "Promoted", color: "var(--status-good)" },
   demote: { icon: "↓", label: "Demoted", color: "var(--status-critical)" },
   rewrite: { icon: "✎", label: "Rewrote", color: "var(--thinking)" },
+  novel: { icon: "◎", label: "Novel pattern", color: "var(--status-warning)" },
 };
 
 export default function Dashboard() {
@@ -168,9 +163,9 @@ export default function Dashboard() {
 
   const series = s?.series ?? [];
   const events = s?.events ?? [];
-  const launchSeq = series.find((p) => p.batch === "launch")?.seq ?? null;
+  const launchSeq = series.find((p) => p.batch === "campaign")?.seq ?? null;
   const now = Date.now();
-  const recentlyDemoted = new Set(events.filter((e) => e.type === "demote" && now - new Date(e.ts).getTime() < 20_000).map((e) => e.node));
+  const recentlyDemoted = new Set(events.filter((e) => e.type === "demote" && e.node && now - new Date(e.ts).getTime() < 20_000).map((e) => e.node as string));
   const k = s?.kpis;
   const sel = selected && s?.nodes?.[selected];
   const selEvents = events.filter((e) => e.node === selected);
@@ -180,34 +175,34 @@ export default function Dashboard() {
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div>
           <h1 className="text-4xl font-bold tracking-tight">Reflexes</h1>
-          <p className="mt-1 text-lg text-ink-2">Agents that grow reflexes. System 2 thinks, System 1 learns, MongoDB remembers.</p>
+          <p className="mt-1 text-lg text-ink-2">A SOC agent that grows reflexes. System 2 thinks, System 1 learns, MongoDB remembers.</p>
         </div>
         <div className="flex items-center gap-3">
           {s?.run && (
             <div className="rounded-full border border-line bg-surface-1 px-4 py-2 text-sm tabular-nums text-ink-2">
-              {s.run.status === "running" ? "● Live" : "Done"} · {s.run.processed}/{s.run.total} requests · harness v{s.harness?.version}
+              {s.run.status === "running" ? "● Live" : "Done"} · {s.run.processed}/{s.run.total} alerts · harness v{s.harness?.version}
             </div>
           )}
           <button onClick={start} className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-page hover:opacity-90">
-            Start Black Friday surge
+            Start alert storm
           </button>
         </div>
       </header>
       {msg && <div className="text-sm text-ink-3">{msg}</div>}
 
       <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-        <Tile label="Customer wait" now={k?.now.wait} before={k?.before.wait} fmt={fmtMs} better={ratio(k?.before.wait, k?.now.wait)} />
-        <Tile label="Decision time per message" now={k?.now.ms} before={k?.before.ms} fmt={fmtMs} better={ratio(k?.before.ms, k?.now.ms)} />
-        <Tile label="Cost per 1,000 messages" now={k?.now.cost} before={k?.before.cost} fmt={fmtCost} better={ratio(k?.before.cost, k?.now.cost)} />
+        <Tile label="Time to triage (incl. queue)" now={k?.now.wait} before={k?.before.wait} fmt={fmtMs} better={ratio(k?.before.wait, k?.now.wait)} />
+        <Tile label="Decision time per alert" now={k?.now.ms} before={k?.before.ms} fmt={fmtMs} better={ratio(k?.before.ms, k?.now.ms)} />
+        <Tile label="Cost per 1,000 alerts" now={k?.now.cost} before={k?.before.cost} fmt={fmtCost} better={ratio(k?.before.cost, k?.now.cost)} />
         <Tile label="Accuracy (held-out labels)" now={k?.now.accuracy} before={k?.before.accuracy} fmt={fmtPct} />
         <Tile label="Decisions on reflex" now={k?.now.reflex} before={k?.before.reflex} fmt={fmtPct} />
       </section>
 
       <section className="rounded-xl border border-line bg-surface-1/40 p-4">
         <div className="mb-3 flex items-center gap-3 text-sm text-ink-3">
-          <span>Customer message</span>
+          <span>Security alert</span>
           <span aria-hidden>→</span>
-          <span>6 decisions per message · click one to inspect its reflex</span>
+          <span>6 decisions per alert · click one to inspect its reflex</span>
         </div>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           {NODE_ORDER.map((n) =>
@@ -244,9 +239,9 @@ export default function Dashboard() {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-2">
-        <Chart title="Customer wait (rolling 20 messages)" data={series} lines={[{ key: "wait", name: "Wait", color: "var(--series-1)" }]} fmt={(v) => fmtMs(v)} events={events} launchSeq={launchSeq} />
-        <Chart title="Cost per 1,000 messages" data={series} lines={[{ key: "cost", name: "Cost", color: "var(--series-1)" }]} fmt={(v) => fmtCost(v)} events={events} launchSeq={launchSeq} />
-        <Chart title="Decision time per message" data={series} lines={[{ key: "ms", name: "Decision time", color: "var(--series-1)" }]} fmt={(v) => fmtMs(v)} events={events} launchSeq={launchSeq} />
+        <Chart title="Time to triage, including queue (rolling 20 alerts)" data={series} lines={[{ key: "wait", name: "Wait", color: "var(--series-1)" }]} fmt={(v) => fmtMs(v)} events={events} launchSeq={launchSeq} />
+        <Chart title="Cost per 1,000 alerts" data={series} lines={[{ key: "cost", name: "Cost", color: "var(--series-1)" }]} fmt={(v) => fmtCost(v)} events={events} launchSeq={launchSeq} />
+        <Chart title="Decision time per alert" data={series} lines={[{ key: "ms", name: "Decision time", color: "var(--series-1)" }]} fmt={(v) => fmtMs(v)} events={events} launchSeq={launchSeq} />
         <Chart
           title="Accuracy vs share of decisions on reflex"
           data={series}
@@ -263,26 +258,32 @@ export default function Dashboard() {
 
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="rounded-xl border border-line bg-surface-1 p-4">
-          <div className="mb-3 text-sm font-medium text-ink-2">Live messages</div>
+          <div className="mb-3 text-sm font-medium text-ink-2">Live alerts · what the agent did</div>
           <ul className="space-y-2">
             {(s?.recent ?? []).map((r) => (
-              <li key={r._id} className="flex items-center gap-3 text-sm">
-                <span className="w-12 shrink-0 tabular-nums text-ink-3">#{r._id}</span>
-                <span className="min-w-0 flex-1 truncate text-ink-2">{r.text}</span>
-                <span className="flex shrink-0 gap-1" aria-label="decision sources">
-                  {NODE_ORDER.map((n) => {
-                    const d = r.nodes.find((x) => x.node === n);
-                    const c = d?.used === "reflex" ? "var(--status-good)" : d?.used === "fallback" ? "var(--status-warning)" : "var(--thinking)";
-                    return <span key={n} title={`${NODE_LABEL[n]}: ${d?.used}`} className="h-2.5 w-2.5 rounded-full" style={{ background: c }} />;
-                  })}
-                </span>
+              <li key={r.seq} className="text-sm">
+                <div className="flex items-center gap-3">
+                  <span className="w-12 shrink-0 tabular-nums text-ink-3">#{r.seq}</span>
+                  <span className="min-w-0 flex-1 truncate text-ink-2">{r.text}</span>
+                  <span className="flex shrink-0 gap-1" aria-label="decision sources">
+                    {NODE_ORDER.map((n) => {
+                      const d = r.nodes.find((x) => x.node === n);
+                      const c = d?.used === "reflex" ? "var(--status-good)" : d?.used === "fallback" ? "var(--status-warning)" : "var(--thinking)";
+                      return <span key={n} title={`${NODE_LABEL[n]}: ${d?.used}${d?.reason ? ` (${d.reason})` : ""}`} className="h-2.5 w-2.5 rounded-full" style={{ background: c }} />;
+                    })}
+                  </span>
+                </div>
+                <div className="ml-15 mt-0.5 flex gap-2 text-xs text-ink-3">
+                  <span className="text-ink-2">→ {r.action}</span>
+                  {r.novel && <span style={{ color: "var(--status-warning)" }}>◎ novel: sent to System 2</span>}
+                </div>
               </li>
             ))}
           </ul>
           <div className="mt-3 flex gap-4 text-xs text-ink-3">
             <span><span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: "var(--thinking)" }} />System 2 (LLM)</span>
             <span><span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: "var(--status-good)" }} />Reflex (Jev)</span>
-            <span><span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: "var(--status-warning)" }} />Low confidence, fell back</span>
+            <span><span className="mr-1 inline-block h-2 w-2 rounded-full" style={{ background: "var(--status-warning)" }} />Fell back (low confidence, novel, or not proven on similar alerts)</span>
           </div>
         </div>
         <div className="rounded-xl border border-line bg-surface-1 p-4">
@@ -295,7 +296,7 @@ export default function Dashboard() {
                   {EVENT_STYLE[e.type].icon} {EVENT_STYLE[e.type].label}
                 </span>
                 <span className="text-ink-2">
-                  <span className="text-ink">{NODE_LABEL[e.node]}</span> · v{e.version} · #{e.seq} · {e.detail}
+                  {e.node && <span className="text-ink">{NODE_LABEL[e.node]} · </span>}v{e.version} · #{e.seq} · {e.detail}
                 </span>
               </li>
             ))}

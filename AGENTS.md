@@ -16,7 +16,9 @@ Rules for any coding agent (Claude Code, Codex, Kiro) working in this repo.
 
 **Reflexes: agents that grow reflexes.** An agent harness that learns from its own experience. Every decision point in an agent starts on a System 2 LLM. Reflexes shadows each one with Jev, TypeSafe AI's System One model, and stores every outcome in MongoDB. When a decision point is reliable, it graduates to a ~100 ms reflex. If a reflex starts failing (drift), it is demoted, its question is rewritten by an evolver, and it re-graduates.
 
-Demo workload: an online store's AI ops agent during a Black Friday surge, with 6 decision points per customer message: `intent`, `urgency`, `needs_human`, `tool`, `policy_ok`, `reply_ok`.
+Demo workload: a SOC agent triaging an alert storm, with 6 decision points per alert: `category`, `severity`, `false_positive`, `escalate`, `playbook`, `auto_ok`. Midway, a new campaign (attacks on the company's AI agents) appears that the v0 taxonomy doesn't cover.
+
+**Memory is a safety mechanism.** Every processed alert goes into `experience`, auto-embedded by Atlas. Before a reflex acts, `$vectorSearch` recalls similar past alerts. The reflex fires only if the alert isn't novel and the reflex agreed with System 2 on those similar cases.
 
 Built solo for the MongoDB x Cerebral Valley "Harness Engineering & Model Wrangling" hackathon, 2026-09-26. Primary track: Recursive Harnessing (statement 1). Secondary: Long Horizon (statement 2). Local context is in HACKATHON_PLAYBOOK.md (gitignored).
 
@@ -46,10 +48,12 @@ lib/models.ts           model IDs: system2, evolver, jev
 lib/jev.ts              System One client: one fan-out call answers all reflex questions
 lib/system2.ts          LLM teacher: structured answers for all decision points
 lib/harness.ts          load and save harness versions (decision graph + reflex definitions)
-lib/engine/decide.ts    route each decision point: system2 | shadow | reflex (+ confidence fallback + audit)
-lib/engine/graduate.ts  aggregation stats per node, then promote or demote
-lib/engine/evolve.ts    rewrite a reflex question from disagreement examples
-scripts/seed.ts         generate labeled workload (base + "new product launch" drift batch)
+lib/engine.ts           route each decision point: shadow | reflex (+ fallback on low confidence, novelty, unproven-here; audits)
+lib/memory.ts           experience store, auto-embed vector index, $vectorSearch recall and novelty
+lib/graduate.ts         promote, demote, rewrite (incl. taxonomy-gap trigger)
+lib/evolve.ts           rewrite a reflex question and its context policy
+lib/runner.ts           alert-storm loop, harness versioning, self-tuned confidence floor, events
+scripts/seed.ts         generate labeled workload (base + AI-agent-attack campaign)
 scripts/run.ts          stream the workload through the agent
 scripts/jev-smoke.ts    Jev connectivity check
 ```
@@ -58,16 +62,18 @@ scripts/jev-smoke.ts    Jev connectivity check
 
 | Collection | Holds |
 | --- | --- |
-| `requests` | Workload messages: `text`, `facts` (precomputed order facts), `truth` (label per node), `batch` (base or launch) |
+| `requests` | Workload alerts: `text`, `facts` (precomputed SOC context), `truth` (label per node), `batch` (base or campaign) |
+| `experience` | Processed alerts with per-node agreement flags; `text` is auto-embedded (vector index `experience_text`) |
 | `harness_versions` | `version`, `parent_id`, `nodes{ name: { mode, question, context_fields[], thresholds } }`, `reason`, `created_at` |
-| `decisions` | One per request × node: `s2{answer, ms, cost}`, `s1{answer, confidence, ms}`, `mode_used`, `final`, `agree`, `correct`, `harness_version` |
+| `decisions` | One per alert × node: `s1{answer, confidence}`, `s2`, `used`, `fallback_reason`, `suggestion`, `final`, `agree`, `correct`, `harness_version` |
+| `results` | One per alert: `ms`, `total_ms` (incl. queue), `cost`, `correct`, `reflex_share`, `recall_top`, `novel`, `action` |
 | `events` | Timeline of promotions, demotions and rewrites: `type`, `node`, `from`, `to`, `detail`, `ts` |
 
 ## Engine rules
 
 - **Hard metrics decide promotion, never vibes.** A node promotes when S1–S2 agreement is ≥ threshold over ≥ N shadow samples. It demotes when audited agreement falls below the demote threshold.
 - In production there are no labels, so the engine uses S2 as teacher plus audit sampling. Ground-truth `truth` is only for reporting accuracy, which proves the engine isn't fooling itself.
-- Jev is bad at math, dates and counting. Deterministic code computes facts (e.g. `within_refund_window: true`) and passes them as state. Never ask Jev to compute.
+- Jev is bad at math, dates and counting. Deterministic code computes facts (e.g. `asset_criticality`, `threat_intel_match`) and passes them as state. Never ask Jev to compute.
 - Keep Jev state small and relevant (context policy per node). Irrelevant context degrades it.
 - All reflex questions go in **one** Jev call per request (fan-out pattern).
 - Log `ms` and `cost` for every S1 and S2 call. The demo depends on them.

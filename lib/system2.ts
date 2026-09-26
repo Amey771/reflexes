@@ -50,11 +50,10 @@ export async function askSystem2(req: Request, nodes: [NodeName, NodeConfig][]):
     model: openrouter(MODELS.system2),
     output: Output.object({ schema: schemaFor(nodes) }),
     system:
-      "You are the decision engine inside an online store's customer-support agent. Think carefully and answer every decision for the message below.",
+      "You are the triage engine inside a security operations center's AI agent. Think carefully and answer every decision for the alert below.",
     prompt: [
-      `Customer message:\n${req.text}`,
-      `Order facts (computed by the store's systems, trust them):\n${JSON.stringify(req.facts)}`,
-      `Draft reply written by the agent:\n${req.draft_reply}`,
+      `Alert:\n${req.text}`,
+      `Context (computed by the SOC's own systems, trust it):\n${JSON.stringify(req.facts)}`,
       `Decisions:\n${nodes.map(([n, c]) => describe(n, c)).join("\n")}`,
     ].join("\n\n"),
   });

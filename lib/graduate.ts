@@ -6,10 +6,12 @@ export type Change =
   | { type: "demote"; node: NodeName; detail: string }
   | { type: "rewrite"; node: NodeName; detail: string };
 
-type Window = { shadow: boolean[]; audits: boolean[]; fallbacks: boolean[]; sinceRewrite: number };
+type Window = { shadow: boolean[]; audits: boolean[]; fallbacks: boolean[]; gaps: boolean[]; sinceRewrite: number };
 
 const REWRITE_AFTER = 30; // shadow samples before a stuck node gets its question rewritten
 const REWRITE_BELOW = 0.8;
+const GAP_WINDOW = 10; // recent System 2 answers checked for "none of the options fit"
+const GAP_MIN = 3;
 
 const rate = (xs: boolean[]) => (xs.length ? xs.filter(Boolean).length / xs.length : 0);
 const last = <T,>(xs: T[], n: number) => xs.slice(-n);
@@ -23,7 +25,7 @@ export class Graduator {
   busy = new Set<NodeName>();
 
   fresh(): Window {
-    return { shadow: [], audits: [], fallbacks: [], sinceRewrite: 0 };
+    return { shadow: [], audits: [], fallbacks: [], gaps: [], sinceRewrite: 0 };
   }
 
   reset(node: NodeName, version: number) {
@@ -39,6 +41,16 @@ export class Graduator {
       const w = this.w[n];
       const t = h.nodes[n].thresholds;
       const mode = h.nodes[n].mode;
+
+      // Taxonomy gap: the teacher keeps proposing an option the reflex doesn't have.
+      if (d.s2 !== undefined) {
+        w.gaps.push(!!d.suggestion);
+        const gaps = last(w.gaps, GAP_WINDOW).filter(Boolean).length;
+        if (w.gaps.length >= GAP_WINDOW / 2 && gaps >= GAP_MIN) {
+          changes.push({ type: "rewrite", node: n, detail: `teacher proposed a new option in ${gaps} of the last ${GAP_WINDOW} decisions ("${d.suggestion ?? "new pattern"}")` });
+          continue;
+        }
+      }
 
       if (mode === "shadow" && d.agree !== undefined) {
         w.shadow.push(d.agree);
