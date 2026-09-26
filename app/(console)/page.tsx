@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { IconLLM, IconReflex, IconRewrite } from "@/app/icons";
 import ImpactCard from "@/app/impact";
 import { NODE_LABEL as LABELS, NODES } from "@/lib/workload";
 
@@ -65,10 +66,10 @@ function Tile({ label, now, before, fmt, better, note }: { label: string; now?: 
 type NodeView = { mode: "shadow" | "reflex"; demoted: boolean; agreement: number | null; samples: number; audits: number; reflexShare: number; confidence: number | null; floor: number };
 
 function nodeStatus(n: NodeView) {
-  if (n.demoted && n.mode === "shadow") return { label: "Demoted · relearning", icon: "↓", color: "var(--status-critical)" };
-  if (n.mode === "reflex") return { label: "Reflex", icon: "⚡", color: "var(--status-good)" };
-  if (n.samples >= 5) return { label: `Learning ${fmtPct(n.agreement)}`, icon: "◐", color: "var(--status-warning)" };
-  return { label: "Thinking", icon: "●", color: "var(--thinking)" };
+  if (n.demoted && n.mode === "shadow") return { label: "Demoted · relearning", icon: <IconRewrite size={15} />, color: "var(--status-critical)" };
+  if (n.mode === "reflex") return { label: "Reflex", icon: <IconReflex size={15} />, color: "var(--status-good)" };
+  if (n.samples >= 5) return { label: `Learning ${fmtPct(n.agreement)}`, icon: <IconLLM size={15} />, color: "var(--status-warning)" };
+  return { label: "On the LLM", icon: <IconLLM size={15} />, color: "var(--thinking)" };
 }
 
 function NodeCard({ name, n, selected, onClick }: { name: string; n: NodeView; selected: boolean; onClick: () => void }) {
@@ -154,6 +155,43 @@ function Chart({ title, data, lines, fmt, events, campaignSeq, domain, xMax }: {
         </ResponsiveContainer>
       </div>
     </div>
+  );
+}
+
+// The one chart that tells the story: reflex share rises, accuracy holds, the new attack is absorbed.
+function HeroChart({ data, xMax, marks }: { data: Point[]; xMax: number; marks: { seq: number; label: string; color: string }[] }) {
+  return (
+    <section className="rounded-2xl border border-line bg-surface-1 p-5">
+      <div className="mb-1 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="text-base font-semibold">How the harness learned</h2>
+        <div className="flex gap-4 text-xs text-ink-3">
+          <span><span className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: "var(--series-2)" }} />Decisions on reflex</span>
+          <span><span className="mr-1 inline-block h-0.5 w-4 align-middle" style={{ background: "var(--series-1)" }} />Accuracy vs labels</span>
+        </div>
+      </div>
+      <div className="text-xs text-ink-3">Rolling 20 alerts. No human changed anything during the run.</div>
+      <div className="mt-3 h-64">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data} margin={{ top: 28, right: 16, bottom: 0, left: 0 }}>
+            <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" vertical={false} />
+            <XAxis dataKey="seq" type="number" domain={[0, xMax]} tick={{ fill: "var(--text-muted)", fontSize: 12 }} stroke="var(--border)" />
+            <YAxis tickFormatter={(v) => fmtPct(v)} domain={[0, 1]} tick={{ fill: "var(--text-muted)", fontSize: 12 }} stroke="var(--border)" width={48} />
+            <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmtPct(Number(v))} labelFormatter={(l) => `Alert #${l}`} />
+            {marks.map((m) => (
+              <ReferenceLine
+                key={m.label}
+                x={m.seq}
+                stroke={m.color}
+                strokeDasharray="4 4"
+                label={{ value: m.label, fill: m.color, fontSize: 12, fontWeight: 600, position: "top" }}
+              />
+            ))}
+            <Line type="monotone" dataKey="reflex" name="Decisions on reflex" stroke="var(--series-2)" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+            <Line type="monotone" dataKey="accuracy" name="Accuracy vs labels" stroke="var(--series-1)" strokeWidth={2.5} dot={false} isAnimationActive={false} />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    </section>
   );
 }
 
@@ -370,7 +408,31 @@ export default function Overview() {
     const decBySeq = new Map<number, Dec[]>();
     for (const d of decisions.filter((d) => recentAlerts.some((a) => a.seq === d.seq))) decBySeq.set(d.seq, [...(decBySeq.get(d.seq) ?? []), d]);
     const campaignSeq = seriesAt.find((p) => p.batch === "campaign")?.seq ?? null;
-    return { seriesAt, eventsAt, harness, nodes, before, now, recentAlerts, decBySeq, campaignSeq, versionCount: vAt + 1, reflexPathMs };
+    // Key moments for the hero chart, from the whole run.
+    const modes: Record<string, string> = Object.fromEntries(NODE_ORDER.map((n) => [n, "shadow"]));
+    let allReflexSeq: number | null = null;
+    let newCategorySeq: number | null = null;
+    for (const e of data?.events ?? []) {
+      if (!e.node) continue;
+      if (e.type === "promote") modes[e.node] = "reflex";
+      if (e.type === "demote" || e.type === "rewrite") modes[e.node] = "shadow";
+      if (allReflexSeq == null && NODE_ORDER.every((n) => modes[n] === "reflex")) allReflexSeq = e.seq;
+      if (newCategorySeq == null && e.type === "rewrite") {
+        const b = e.before?.question ?? (e.before as Question | undefined);
+        const a = e.after?.question;
+        const bk = b && !Array.isArray(b.criteria) ? criteriaKeys(b) : [];
+        const ak = a && !Array.isArray(a.criteria) ? criteriaKeys(a) : [];
+        if (ak.some((k) => !bk.includes(k))) newCategorySeq = e.seq;
+      }
+    }
+    const firstCampaign = series.find((p) => p.batch === "campaign")?.seq ?? null;
+    const marks = [
+      allReflexSeq != null && { seq: allReflexSeq, label: `All 6 reflexes · #${allReflexSeq}`, color: "var(--status-good)" },
+      firstCampaign != null && { seq: firstCampaign, label: `New attack type · #${firstCampaign}`, color: "var(--status-warning)" },
+      newCategorySeq != null && { seq: newCategorySeq, label: `Added a category · #${newCategorySeq}`, color: "var(--thinking)" },
+    ].filter(Boolean) as { seq: number; label: string; color: string }[];
+
+    return { seriesAt, eventsAt, harness, nodes, before, now, recentAlerts, decBySeq, campaignSeq, versionCount: vAt + 1, reflexPathMs, marks };
   }, [series, data, at]);
 
   async function start() {
@@ -466,21 +528,8 @@ export default function Overview() {
 
           <ImpactCard />
 
-          <div className="text-xs text-ink-3">At alert #{at}: rolling 20-alert window, compared with alert 20 when everything was on the LLM</div>
-          <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-            <Tile
-              label="Decision time per alert"
-              now={k?.ms}
-              before={b?.ms}
-              fmt={fmtMs}
-              better={ratio(b?.ms, k?.ms)}
-              note={view.reflexPathMs != null ? `all-reflex alerts: ${fmtMs(view.reflexPathMs)} (median)` : null}
-            />
-            <Tile label="Cost per 1,000 alerts" now={k?.cost} before={b?.cost} fmt={fmtCost} better={ratio(b?.cost, k?.cost)} note="incl. background audits" />
-            <Tile label="Accuracy vs ground truth" now={k?.accuracy} before={b?.accuracy} fmt={fmtPct} note="labels never shown to the engine" />
-            <Tile label="Decisions on reflex" now={k?.reflex} before={b?.reflex} fmt={fmtPct} />
-            <Tile label="Alerts with no LLM call" now={k?.noLlm} before={b?.noLlm} fmt={fmtPct} note="all 6 decisions made by Jev" />
-          </section>
+          <HeroChart data={view.seriesAt} xMax={total} marks={view.marks} />
+
 
           <section className="rounded-xl border border-line bg-surface-1/40 p-4">
             <div className="mb-3 flex items-center gap-3 text-sm text-ink-3">
@@ -527,20 +576,23 @@ export default function Overview() {
             )}
           </section>
 
-          <section className="grid gap-4 lg:grid-cols-2">
-            <Chart
-              title="Share of decisions on reflex, and accuracy (rolling 20 alerts)"
-              data={view.seriesAt}
-              lines={[
-                { key: "reflex", name: "On reflex (Jev)", color: "var(--series-2)" },
-                { key: "accuracy", name: "Accuracy vs ground truth", color: "var(--series-1)" },
-              ]}
-              fmt={(v) => fmtPct(v)}
-              events={view.eventsAt}
-              campaignSeq={view.campaignSeq}
-              domain={[0, 1]}
-              xMax={total}
+          <div className="text-xs font-medium uppercase tracking-wider text-ink-3">Live metrics · at alert #{at}, rolling 20 alerts vs alert 20</div>
+          <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
+            <Tile
+              label="Decision time per alert"
+              now={k?.ms}
+              before={b?.ms}
+              fmt={fmtMs}
+              better={ratio(b?.ms, k?.ms)}
+              note={view.reflexPathMs != null ? `all-reflex alerts: ${fmtMs(view.reflexPathMs)} (median)` : null}
             />
+            <Tile label="Cost per 1,000 alerts" now={k?.cost} before={b?.cost} fmt={fmtCost} better={ratio(b?.cost, k?.cost)} note="incl. background audits" />
+            <Tile label="Accuracy vs ground truth" now={k?.accuracy} before={b?.accuracy} fmt={fmtPct} note="labels never shown to the engine" />
+            <Tile label="Decisions on reflex" now={k?.reflex} before={b?.reflex} fmt={fmtPct} />
+            <Tile label="Alerts with no LLM call" now={k?.noLlm} before={b?.noLlm} fmt={fmtPct} note="all 6 decisions made by Jev" />
+          </section>
+
+          <section className="grid gap-4 lg:grid-cols-3">
             <Chart
               title="Decision time per alert"
               data={view.seriesAt}

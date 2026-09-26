@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState } from "react";
+import { IconReflex } from "@/app/icons";
 import { NODES } from "@/lib/workload";
 
 // The Reflexes console: sidebar navigation, workspace + run picker, harness status.
@@ -71,7 +72,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
               <Link
                 key={item.href}
                 href={withDb(item.href)}
-                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${active ? "bg-surface-2 font-semibold text-ink" : "text-ink-2 hover:bg-surface-2/60"}`}
+                className={`flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors ${active ? "bg-surface-2 font-semibold text-ink shadow-[inset_3px_0_0_var(--status-good)]" : "text-ink-2 hover:bg-surface-2/60"}`}
               >
                 <span aria-hidden className="w-4 text-center text-ink-3">{item.icon}</span>
                 {item.label}
@@ -101,7 +102,7 @@ export default function ConsoleShell({ children }: { children: React.ReactNode }
           </select>
           {status && (
             <span className="inline-flex items-center gap-2 rounded-full bg-surface-1 px-3 py-1.5 text-sm tabular-nums" style={{ color: status.reflex === NODES.length ? "var(--status-good)" : "var(--text-secondary)" }}>
-              <span aria-hidden>⚡</span>
+              <IconReflex size={15} />
               {status.reflex}/{NODES.length} decisions on reflex
               {status.version != null && <span className="text-ink-3">· harness v{status.version}</span>}
               {status.running && <span className="text-warn">· live</span>}

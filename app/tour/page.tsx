@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { STATE_ICON } from "@/app/icons";
 import ImpactCard from "@/app/impact";
 import { CHAPTERS, LEGEND, PAIN, STORY_DB } from "@/lib/story";
 import { NODE_LABEL, NODES, type NodeName } from "@/lib/workload";
@@ -199,8 +200,11 @@ export default function Story() {
                 const used = view.example.find((d) => d.node === n)?.used;
                 const s = used ? SOURCE[used] : "llm";
                 return (
-                  <li key={n} className="flex items-center gap-1.5">
-                    <span aria-hidden style={{ color: STATE_COLOR[s] }}>{LEGEND[s].icon}</span>
+                  <li key={n} className="flex items-center gap-1.5" style={{ color: STATE_COLOR[s] }}>
+                    {(() => {
+                      const Icon = STATE_ICON[s];
+                      return <Icon size={16} className="shrink-0" />;
+                    })()}
                     <span className="text-ink-2">{NODE_LABEL[n]}</span>
                   </li>
                 );
@@ -225,7 +229,10 @@ export default function Story() {
                 >
                   <div className="text-base font-medium text-ink-2">{NODE_LABEL[n]}</div>
                   <div className="mt-2 flex items-center gap-2" style={{ color: STATE_COLOR[state] }}>
-                    <span className="text-4xl leading-none" aria-hidden>{LEGEND[state].icon}</span>
+                    {(() => {
+                      const Icon = STATE_ICON[state];
+                      return <Icon size={34} className="shrink-0" />;
+                    })()}
                     <span className="text-2xl font-bold leading-tight">{LEGEND[state].label}</span>
                   </div>
                   <div className="mt-1 text-xs text-ink-3">{LEGEND[state].sub}</div>
@@ -275,7 +282,13 @@ export default function Story() {
       <footer className="mt-auto flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-4 text-sm text-ink-3">
         {(Object.keys(LEGEND) as CardState[]).map((k) => (
           <span key={k}>
-            <span aria-hidden style={{ color: STATE_COLOR[k] }}>{LEGEND[k].icon}</span> {LEGEND[k].label}
+            <span className="inline-flex items-center gap-1.5" style={{ color: STATE_COLOR[k] }}>
+              {(() => {
+                const Icon = STATE_ICON[k];
+                return <Icon size={14} />;
+              })()}
+            </span>{" "}
+            {LEGEND[k].label}
           </span>
         ))}
         <span className="ml-auto">LLM = System 2 (slow thinking) · Jev = System 1 (reflex) · MongoDB = memory</span>

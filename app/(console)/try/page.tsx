@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { IconHandedBack, IconLLM, IconReflex } from "@/app/icons";
 import type { TriageResult } from "@/lib/triage";
 
 // Try it: paste an alert and see what the learned harness does with it, live.
@@ -32,10 +33,14 @@ const PRESETS: { name: string; tagline: string; text: string; facts: Partial<Fac
 ];
 
 const ROUTE = {
-  reflex: { icon: "⚡", label: "Reflex", color: "var(--status-good)" },
-  handed_back: { icon: "↩", label: "Would ask the LLM", color: "var(--status-warning)" },
-  llm_learning: { icon: "🧠", label: "LLM (still learning)", color: "var(--thinking)" },
+  reflex: { Icon: IconReflex, label: "Reflex", color: "var(--status-good)" },
+  handed_back: { Icon: IconHandedBack, label: "Would ask the LLM", color: "var(--status-warning)" },
+  llm_learning: { Icon: IconLLM, label: "LLM (still learning)", color: "var(--thinking)" },
 } as const;
+
+// Run 3 averages with every decision on the LLM (first 20 alerts): the baseline Try it compares against.
+const LLM_MS = 890;
+const LLM_COST = 0.00103;
 
 const fmtAnswer = (a: unknown) => (typeof a === "boolean" ? (a ? "yes" : "no") : String(a).replaceAll("_", " "));
 
@@ -151,6 +156,32 @@ export default function TryIt() {
                 <div className="text-xl font-semibold" style={{ color: handedBack ? "var(--status-warning)" : "var(--status-good)" }}>
                   {handedBack ? `${handedBack} of 6 decisions would go to the LLM` : `Handled by reflexes in ${result.ms} ms, no LLM call`}
                 </div>
+                <div className="mt-3 space-y-1.5 text-xs">
+                  <div className="flex items-center gap-2">
+                    <span className="w-40 shrink-0 text-ink-3">Reflexes (Jev + memory)</span>
+                    <div className="h-2.5 flex-1 rounded-full bg-surface-2">
+                      <div className="h-full rounded-full" style={{ width: `${Math.max(3, Math.min(100, (result.ms / LLM_MS) * 100))}%`, background: "var(--status-good)" }} />
+                    </div>
+                    <span className="w-16 shrink-0 whitespace-nowrap text-right tabular-nums text-ink-2">{result.ms} ms</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="w-40 shrink-0 text-ink-3">Every decision on the LLM</span>
+                    <div className="h-2.5 flex-1 rounded-full bg-surface-2">
+                      <div className="h-full w-full rounded-full" style={{ background: "var(--thinking)" }} />
+                    </div>
+                    <span className="w-16 shrink-0 whitespace-nowrap text-right tabular-nums text-ink-2">~{LLM_MS} ms</span>
+                  </div>
+                </div>
+                {!handedBack && (
+                  <div className="mt-2 text-sm font-medium text-good">
+                    Saved vs sending every decision to the LLM: ~{Math.max(0, LLM_MS - result.ms)} ms and ~${Math.max(0, LLM_COST - result.cost).toFixed(5)} on this alert (run 3 averages)
+                  </div>
+                )}
+                {handedBack > 0 && (
+                  <div className="mt-2 text-sm text-ink-2">
+                    {6 - handedBack} of 6 decisions were answered by reflexes; the other {handedBack} would still need the LLM (~{LLM_MS} ms), so this alert isn&apos;t faster yet. It&apos;s safe instead.
+                  </div>
+                )}
                 <div className="mt-1 text-sm text-ink-3">
                   {result.action ? `Action: ${result.action}` : "Action waits for the LLM's answers"} · {result.ms} ms · ${result.cost.toFixed(6)} · harness v{result.harness_version}
                   {result.novel ? " · unlike anything in memory" : ""}
@@ -163,8 +194,9 @@ export default function TryIt() {
                   return (
                     <li key={d.node} className="grid grid-cols-[9rem_1fr] gap-3 px-4 py-3 text-sm sm:grid-cols-[9rem_10rem_1fr]">
                       <div className="font-medium">{d.label}</div>
-                      <div className="font-semibold" style={{ color: r.color }}>
-                        {r.icon} {d.route === "reflex" ? fmtAnswer(d.answer) : r.label}
+                      <div className="flex items-start gap-1.5 font-semibold" style={{ color: r.color }}>
+                        <r.Icon size={16} className="mt-0.5 shrink-0" />
+                        <span>{d.route === "reflex" ? fmtAnswer(d.answer) : r.label}</span>
                       </div>
                       <div className="col-span-2 text-ink-3 sm:col-span-1">
                         {d.route !== "reflex" && <span className="text-ink-2">Jev&apos;s guess: {fmtAnswer(d.answer)}. </span>}

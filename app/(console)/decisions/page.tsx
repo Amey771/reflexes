@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { IconLLM, IconReflex } from "@/app/icons";
 import { NODE_LABEL, NODES } from "@/lib/workload";
 import { EVENT_STYLE, optionKeys, useRun, type Ev } from "../data";
 
@@ -71,8 +72,9 @@ export default function Decisions() {
               <section key={n} className="flex flex-col gap-3 rounded-xl border bg-surface-1 p-4" style={{ borderColor: reflex ? "var(--status-good)" : "var(--border)" }}>
                 <div className="flex items-center justify-between gap-3">
                   <h2 className="text-lg font-semibold">{NODE_LABEL[n]}</h2>
-                  <span className="rounded-full bg-surface-2 px-3 py-1 text-sm font-semibold" style={{ color: reflex ? "var(--status-good)" : "var(--thinking)" }}>
-                    {reflex ? "⚡ Reflex" : "🧠 On the LLM"}
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-3 py-1 text-sm font-semibold" style={{ color: reflex ? "var(--status-good)" : "var(--thinking)" }}>
+                    {reflex ? <IconReflex size={15} /> : <IconLLM size={15} />}
+                    {reflex ? "Reflex" : "On the LLM"}
                   </span>
                 </div>
                 <div>
