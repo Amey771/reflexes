@@ -32,7 +32,7 @@ export async function resetAll() {
 }
 
 export async function runSurge(opts: RunOptions = {}) {
-  const { concurrency = 3, arrivalsPerSec = 4, log = console.log } = opts;
+  const { concurrency = 6, arrivalsPerSec = 3, log = console.log } = opts;
   const db = await getDb();
   if (opts.reset || !(await latestHarness())) await resetAll();
   await ensureVectorIndex(log);
@@ -135,8 +135,9 @@ export async function runSurge(opts: RunOptions = {}) {
 
   // Arrivals: alert i arrives at i / arrivalsPerSec seconds after start.
   const queue = requests.map((r, i) => ({ r, arrives: startedAt + (i * 1000) / arrivalsPerSec }));
+  let outOfCredit = false;
   async function worker() {
-    while (queue.length) {
+    while (queue.length && !outOfCredit) {
       const item = queue.shift()!;
       const wait = item.arrives - Date.now();
       if (wait > 0) await new Promise((res) => setTimeout(res, wait));
@@ -147,7 +148,13 @@ export async function runSurge(opts: RunOptions = {}) {
         try {
           res = await processRequest(item.r, h, (t) => memory.recall(t));
         } catch (e) {
-          log(`seq ${item.r.seq} failed: ${(e as Error).message}`);
+          const msg = (e as Error).message;
+          log(`seq ${item.r.seq} failed: ${msg.slice(0, 200)}`);
+          if (/credits|402/i.test(msg)) {
+            outOfCredit = true; // stop cleanly and keep everything recorded so far
+            log("Out of OpenRouter credit: stopping the run.");
+            break;
+          }
         }
       }
       if (!res) continue;

@@ -10,6 +10,9 @@ const arg = (name: string) => {
   return i > -1 ? process.argv[i + 1] : undefined;
 };
 
+// A stray rejected model call must never kill a recording run.
+process.on("unhandledRejection", (e) => console.error("unhandled rejection:", (e as Error)?.message?.slice(0, 200)));
+
 runSurge({
   limit: arg("limit") ? Number(arg("limit")) : undefined,
   arrivalsPerSec: arg("rate") ? Number(arg("rate")) : undefined,

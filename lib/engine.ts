@@ -22,7 +22,7 @@ export type Decision = {
 };
 
 // Share of alerts whose reflex decisions are re-checked by System 2 in the background.
-export const AUDIT_RATE = 0.12;
+export const AUDIT_RATE = 0.08;
 
 export type AuditUpdate = { node: NodeName; s2: Answer; agree: boolean; suggestion?: string };
 
@@ -90,6 +90,7 @@ export async function processRequest(
   // System 2 starts right away for shadow nodes; System 1 and memory recall always run.
   const s2First = all.filter(([, c]) => c.mode === "shadow");
   const s2Promise: Promise<System2Result | null> = s2First.length ? askSystem2(req, s2First) : Promise.resolve(null);
+  s2Promise.catch(() => {}); // if System 1 fails first, don't leave this rejection unhandled
   const [s1, mem] = await Promise.all([runSystem1(req, all), recall(req.text)]);
 
   // A reflex falls back to System 2 when Jev isn't confident, when the alert is unlike anything

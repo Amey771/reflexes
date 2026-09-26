@@ -28,6 +28,7 @@ export async function rewriteQuestion(
   const { output } = await generateText({
     model: openrouter(MODELS.evolver),
     providerOptions: { openrouter: { reasoning: { enabled: false } } }, // keeps rewrites to seconds, not minutes
+    maxOutputTokens: 2000,
     output: Output.object({
       schema: z.object({
         instructions: z.string(),

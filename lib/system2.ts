@@ -51,6 +51,7 @@ export async function askSystem2(req: Request, nodes: [NodeName, NodeConfig][]):
     output: Output.object({ schema: schemaFor(nodes) }),
     // Extended reasoning would make each call ~9 s and blow the budget; answer directly.
     providerOptions: { openrouter: { reasoning: { enabled: false } } },
+    maxOutputTokens: 600, // the default reserves 65k tokens of credit per call
     system:
       "You are the triage engine inside a security operations center's AI agent. Think carefully and answer every decision for the alert below.",
     prompt: [

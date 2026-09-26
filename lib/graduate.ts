@@ -11,7 +11,7 @@ type Window = { shadow: Sample[]; audits: boolean[]; fallbacks: boolean[]; gaps:
 
 const REWRITE_AFTER = 20; // shadow samples before a stuck node gets its question rewritten
 const REWRITE_BELOW = 0.85;
-const FLOOR_AGREEMENT = 0.95; // a reflex must agree with the teacher this often on the cases it would handle
+const FLOOR_AGREEMENT = 0.97; // a reflex must agree with the teacher this often on the cases it would handle
 const MIN_COVERAGE = 0.6; // ...and handle at least this share of cases itself
 
 // Promotion on what the reflex would actually do: the lowest confidence floor at which agreement on
