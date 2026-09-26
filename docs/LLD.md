@@ -18,8 +18,12 @@ This document covers the module-level design: data schemas, algorithms, constant
 | `lib/runner.ts` | Run loop, versioning, events, audit application, credit stop | `runSurge`, `resetAll`, `latestHarness` |
 | `app/api/state/route.ts` | Whole-run read API, archive selection, CDN caching | `GET` |
 | `app/api/run/route.ts` | Local-only run trigger | `POST` |
-| `app/page.tsx` | Story mode (default view): six chapters pinned to real moments of the recorded run | default component |
-| `app/details/page.tsx` | Analyst dashboard: "as of alert N" rendering, replay, drill-down | default component |
+| `app/(console)/layout.tsx`, `shell.tsx` | Console shell: sidebar navigation, workspace label, run picker (`?db=`), reflex-status pill, tour link | `ConsoleShell` |
+| `app/(console)/page.tsx` | Overview: "as of alert N" rendering, replay, drill-down | default component |
+| `app/(console)/decisions`, `memory`, `history`, `try` | Decision cards; memory search; version timeline; live triage of a pasted alert | pages |
+| `app/(console)/data.ts` | Shared payload types, `useRun()` hook, event styles | `useRun`, `optionKeys` |
+| `app/tour/page.tsx` | Product tour: six chapters pinned to real moments of the recorded run | default component |
+| `lib/triage.ts` | Triage one pasted alert with the learned harness (Jev + Vector Search, no LLM call) | `triageAlert` |
 | `lib/story.ts` | Story chapters (frame, caption, proof), pain line, plain-language legend | `CHAPTERS`, `PAIN`, `LEGEND`, `STORY_DB` |
 | `scripts/*.ts` | Seed, index, run, archive, stats, headline, timing, probe, checks | CLI entry points |
 
@@ -225,11 +229,22 @@ This endpoint returns the latest run in the chosen database. `db` is whitelisted
 - **Caching.** Finished runs are served with `s-maxage=30, stale-while-revalidate=300`; live runs use `no-store`.
 - **Alert texts** are cached per database in the server process.
 
+### `POST /api/triage`
+
+The request is `{ text, facts? }`. Jev answers all six questions under the latest harness, and `$vectorSearch` over the live experience memory gives novelty, trust and the top 3 neighbors. **No LLM is called**; decisions that would need one come back as `handed_back` or `llm_learning`. It costs about $0.00004 per call.
+
+- **Response:** `{ ms, cost, harness_version, novel, top, decisions[{ node, label, answer, confidence, floor, route, reason }], neighbors[{ seq, text, score }], action }`
+- **Limits:** 2,000 characters per alert and 20 requests per IP per minute (in-memory, per instance).
+
+### `GET /api/similar?q=`
+
+A semantic search of the live `experience` memory, filtered to the latest run (`limit 8`, `numCandidates 120`). It returns `{ results[{ seq, text, score, agree }] }` and backs the Memory page.
+
 ### `POST /api/run`
 
 This starts `runSurge({ reset: true })` in the background. It only works when `ALLOW_RUN=1`, and returns 403 otherwise. It isn't intended for serverless use.
 
-## 10. Dashboard (`app/details/page.tsx`) and story mode (`app/page.tsx`)
+## 10. Console (`app/(console)`) and product tour (`app/tour/page.tsx`)
 
 - **One payload, rendered as of alert N.**
   - Live mode sets N to the last processed seq.
@@ -255,7 +270,7 @@ This starts `runSurge({ reset: true })` in the background. It only works when `A
 
   A read-only deployment replays a finished run automatically.
 
-**Story mode (`/`).**
+**Product tour (`/tour`).** `/details` redirects to `/` for old links.
 - It loads `/api/state?db=run3` once. Each chapter in `lib/story.ts` pins a frame (`at`), an optional animation start (`from`), a focus card and an example alert.
 - **Next**, the chapter pills, or ←/→ move between chapters; `?ch=N` opens one directly. A chapter with `from` animates the cursor from `from` to `at` over 2.6 s.
 - Each card shows one plain state:

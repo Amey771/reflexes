@@ -47,8 +47,9 @@ Built solo for the MongoDB x Cerebral Valley "Harness Engineering & Model Wrangl
 ## Layout
 
 ```text
-app/page.tsx               story mode (default): six chapters pinned to run-3 moments (?ch=N, ←/→)
-app/details/page.tsx       dashboard: renders a run "as of alert N" (live, replay, ?db= ?at= ?node= ?replay= ?speed=)
+app/(console)/             the product console: shell (sidebar, run picker), Overview (/), decisions, memory, history, try
+app/tour/page.tsx          product tour: six chapters pinned to run-3 moments (?ch=N, ←/→)
+app/api/triage, similar    live triage of a pasted alert (Jev + Vector Search, no LLM); memory search
 lib/story.ts               story chapters, pain line, plain-language legend
 app/api/state/route.ts     whole-run read API (+ archive whitelist, CDN cache for finished runs)
 app/api/run/route.ts       local-only run trigger (ALLOW_RUN=1)
@@ -110,7 +111,7 @@ docs/DEMO.md               demo kit: video script, table demo, Q&A, submission t
 
 ## Commands
 
-- `npm run dev`: story mode at http://localhost:3000, dashboard at `/details` (try `/details?db=run3&replay=1&speed=2`)
+- `npm run dev`: console at http://localhost:3000 (Try it at `/try?preset=2`; tour at `/tour`)
 - `npm run build && npm start`: production build (no dev badge, for recording)
 - `npm run jev`, `npx tsx scripts/check.ts`: connectivity
 - `npm run seed`, `npx tsx scripts/index.ts`, `npm run run`: workload, vector index, run

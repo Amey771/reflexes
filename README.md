@@ -3,7 +3,7 @@
 **Agents that grow reflexes.** An agent harness that learns from its own experience and moves each decision from an LLM to a System One reflex (about 250 ms for an all-reflex alert) once the decision has proven reliable. It demotes and rewrites that reflex when the world changes. In our run it cut cost per alert 2.6× for a 4-point accuracy trade, and it taught itself a new attack category when a campaign appeared.
 
 - **Demo video (1 min):** TODO
-- **Live demo:** TODO. `/` is a six-chapter story of the recorded run for judges; `/details` is the full analyst dashboard.
+- **Live app:** TODO. `/` is the Reflexes console: Overview, Decisions, Memory, Harness history, and **Try it**, where you paste an alert and the learned harness triages it live. `/tour` is a six-chapter product tour.
 - Built solo at the MongoDB x Cerebral Valley *Harness Engineering & Model Wrangling* hackathon, NYC, Sep 26 2026.
 - **Tracks:** Recursive Harnessing (primary), Long Horizon Engineering (secondary).
 - **Docs:** [High-level design](docs/HLD.md) · [Low-level design](docs/LLD.md) · [Demo guide](docs/DEMO.md)
@@ -130,7 +130,7 @@ npx tsx scripts/archive.ts reflexes_run4   # archive the run before the next one
 npm run dev                    # dashboard at http://localhost:3000
 ```
 
-**Story mode:** `/` (←/→ keys, or `/?ch=5` to open a chapter). **Replay the full dashboard:** `/details?db=run3&replay=1&speed=2`. **Freeze a moment:** `/details?db=run3&at=330&node=category`. Operations and failure modes are covered in [LLD §11–12](docs/LLD.md#11-operations).
+**Console:** `/` (run picker in the top bar). **Try it:** `/try?preset=2`. **Product tour:** `/tour` (←/→, or `/tour?ch=5`). **Replay a run:** `/?db=run3&replay=1&speed=2`. **Freeze a moment:** `/?db=run3&at=330&node=category`. Operations and failure modes are covered in [LLD §11–12](docs/LLD.md#11-operations).
 
 ## Built with
 
