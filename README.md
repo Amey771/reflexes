@@ -8,6 +8,14 @@
 - **Tracks:** Recursive Harnessing (primary), Long Horizon Engineering (secondary).
 - **Docs:** [High-level design](docs/HLD.md) · [Low-level design](docs/LLD.md) · [Demo guide](docs/DEMO.md)
 
+![The Reflexes console: 81% of decisions moved off the LLM in run 3](docs/images/console.png)
+
+*The console on run 3. The orange line is the share of decisions made by reflexes, and the blue line is accuracy against held-out labels.*
+
+![The Sandbox: one campaign alert through the full engine](docs/images/sandbox.png)
+
+*The [Sandbox](https://reflexes-omega.vercel.app/sandbox) on a new-attack alert. Each reflex must pass three checks; three stepped aside to the LLM, three acted alone, and every answer matched the hidden label.*
+
 ## The problem
 
 When you learned to drive, you thought hard about every mirror check. A year later it was a reflex. AI agents never make that jump.

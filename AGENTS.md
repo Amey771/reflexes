@@ -25,8 +25,9 @@ Built solo for the MongoDB x Cerebral Valley "Harness Engineering & Model Wrangl
 ## Status (2026-09-26, afternoon)
 
 - The final run is done: **run #3** (360 alerts, gpt-5.4-mini teacher). It's live in `reflexes` and archived as `reflexes_run3`. Backups: `reflexes_run1` (Sonnet teacher, full) and `reflexes_run2` (Sonnet teacher, cut at 259 by the credit cap).
-- **The engine is frozen**, and the OpenRouter budget is nearly exhausted. Don't start new runs without asking the user.
-- Code freeze is 3:05pm EDT; the deadline is 4:00pm EDT.
+- **The engine is frozen.** Don't start new runs without asking the user.
+- The Sandbox (`/sandbox`) runs one alert through the live engine, read-only. It's enabled in production with `ALLOW_SANDBOX=1`.
+- The submission deadline was extended to 4:30pm EDT. The top 6 present at MongoDB.local NYC on Sep 30.
 
 ## Hard constraints
 
