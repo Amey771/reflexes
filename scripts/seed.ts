@@ -1,6 +1,7 @@
 import { config } from "dotenv";
 config({ path: ".env.local" });
 
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { generateText, Output } from "ai";
 import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { z } from "zod";
@@ -16,6 +17,7 @@ const BASE = 360;
 const CAMPAIGN = 90;
 const BASE_ONLY = 240;
 const BATCH = 15;
+const CACHE = "data/alerts.json"; // generated once, then loaded; `--fresh` regenerates
 
 type Spec = { id: number; category: string; facts: Facts; scanner: boolean; fp: boolean; severity: number };
 
@@ -77,7 +79,7 @@ ${JSON.stringify(specs.map(({ id, category, scanner, facts }) => ({ id, category
   return output.items;
 }
 
-async function main() {
+async function generate(): Promise<Request[]> {
   const categories: [string, number][] = [
     ["phishing", 0.2], ["malware", 0.12], ["credential_compromise", 0.14], ["brute_force", 0.14],
     ["data_exfiltration", 0.08], ["policy_violation", 0.12], ["benign_admin_activity", 0.15], ["other", 0.05],
@@ -129,6 +131,21 @@ async function main() {
         auto_ok: autoOkFor(s.fp, s.severity, s.facts),
       },
     }));
+  return requests;
+}
+
+async function main() {
+  let requests: Request[];
+  if (existsSync(CACHE) && !process.argv.includes("--fresh")) {
+    requests = JSON.parse(readFileSync(CACHE, "utf8"));
+    console.log(`Loaded ${requests.length} alerts from ${CACHE}`);
+  } else {
+    requests = await generate();
+    mkdirSync("data", { recursive: true });
+    writeFileSync(CACHE, JSON.stringify(requests, null, 1));
+    console.log(`Wrote ${requests.length} alerts to ${CACHE}`);
+  }
+  if (process.argv.includes("--no-db")) return;
 
   const db = await getDb();
   await db.collection("requests").deleteMany({});
