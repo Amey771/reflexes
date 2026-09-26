@@ -3,10 +3,10 @@
 **Agents that grow reflexes.** An agent harness that learns from its own experience and moves each decision from an LLM to a System One reflex (about 250 ms for an all-reflex alert) once the decision has proven reliable. It demotes and rewrites that reflex when the world changes. In our run it cut cost per alert 2.6× for a 4-point accuracy trade, and it taught itself a new attack category when a campaign appeared.
 
 - **Demo video (1 min):** TODO
-- **Live dashboard (replays a recorded run):** TODO
+- **Live demo:** TODO. `/` is a six-chapter story of the recorded run for judges; `/details` is the full analyst dashboard.
 - Built solo at the MongoDB x Cerebral Valley *Harness Engineering & Model Wrangling* hackathon, NYC, Sep 26 2026.
 - **Tracks:** Recursive Harnessing (primary), Long Horizon Engineering (secondary).
-- **Design docs:** [High-level design](docs/HLD.md) · [Low-level design](docs/LLD.md)
+- **Docs:** [High-level design](docs/HLD.md) · [Low-level design](docs/LLD.md) · [Demo guide](docs/DEMO.md)
 
 ## The problem
 
@@ -34,7 +34,7 @@ From the final recorded run: 360 alerts, with the AI-agent-attack campaign start
 
 | Phase | Decision time | Cost per 1,000 alerts | Accuracy vs labels | Decisions on reflex | Alerts with no LLM call |
 | --- | --- | --- | --- | --- | --- |
-| Start: everything on the LLM (alerts 0–18) | 887 ms | $1.03 | 95.6% | 0% | 0% |
+| Start: everything on the LLM (first 20 alerts) | 886 ms | $1.03 | 95.8% | 0% | 0% |
 | **Graduated, before the campaign (100–245)** | 791 ms | **$0.40 (2.6× lower)** | **91.8%** | 81% | 38% |
 | New campaign, before the rewrite (246–324) | 1,009 ms | $0.87 | 80.6% | 62% | 1% |
 | After the harness added a category (325–359) | 910 ms | $0.96 | 80.0% | 63% | 11% |
@@ -130,7 +130,7 @@ npx tsx scripts/archive.ts reflexes_run4   # archive the run before the next one
 npm run dev                    # dashboard at http://localhost:3000
 ```
 
-**Replay a recorded run:** `/?db=run3&replay=1&speed=2`. **Freeze a moment:** `/?db=run3&at=330&node=category`. Operations and failure modes are covered in [LLD §11–12](docs/LLD.md#11-operations).
+**Story mode:** `/` (←/→ keys, or `/?ch=5` to open a chapter). **Replay the full dashboard:** `/details?db=run3&replay=1&speed=2`. **Freeze a moment:** `/details?db=run3&at=330&node=category`. Operations and failure modes are covered in [LLD §11–12](docs/LLD.md#11-operations).
 
 ## Built with
 
