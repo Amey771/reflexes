@@ -48,7 +48,7 @@ flowchart LR
 | Evolver | Rewrites a reflex's question and context policy from problem cases | `lib/evolve.ts` |
 | Runner | Drives a run (arrival schedule, worker pool), versions the harness, writes events, applies async audits | `lib/runner.ts` |
 | Workload | Decision graph, v0 questions, labels, deterministic facts and actions | `lib/workload.ts`, `scripts/seed.ts` |
-| State API and dashboard | Return a whole run, and render it "as of alert N" for live view and replay | `app/api/state/route.ts`, `app/page.tsx` |
+| State API, story mode and dashboard | Return a whole run. Story mode (`/`) tells it in six chapters for judges; the dashboard (`/details`) renders it "as of alert N" for live view and replay. | `app/api/state/route.ts`, `app/page.tsx`, `app/details/page.tsx`, `lib/story.ts` |
 
 ## 4. Decision-node lifecycle
 
@@ -126,7 +126,7 @@ flowchart LR
   end
   ARC -. $out copy .-> ARCH
   subgraph Vercel
-    APP[Next.js dashboard<br/>read-only, ALLOW_RUN unset]
+    APP[Next.js: story mode + dashboard<br/>read-only, ALLOW_RUN unset]
   end
   APP --> DB
   APP --> ARCH

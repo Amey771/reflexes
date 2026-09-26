@@ -18,7 +18,9 @@ This document covers the module-level design: data schemas, algorithms, constant
 | `lib/runner.ts` | Run loop, versioning, events, audit application, credit stop | `runSurge`, `resetAll`, `latestHarness` |
 | `app/api/state/route.ts` | Whole-run read API, archive selection, CDN caching | `GET` |
 | `app/api/run/route.ts` | Local-only run trigger | `POST` |
-| `app/page.tsx` | Dashboard: "as of alert N" rendering, replay, drill-down | default component |
+| `app/page.tsx` | Story mode (default view): six chapters pinned to real moments of the recorded run | default component |
+| `app/details/page.tsx` | Analyst dashboard: "as of alert N" rendering, replay, drill-down | default component |
+| `lib/story.ts` | Story chapters (frame, caption, proof), pain line, plain-language legend | `CHAPTERS`, `PAIN`, `LEGEND`, `STORY_DB` |
 | `scripts/*.ts` | Seed, index, run, archive, stats, headline, timing, probe, checks | CLI entry points |
 
 ## 2. Data model
@@ -114,6 +116,8 @@ with probability AUDIT_RATE and at least one reflex decision:
 | noul | `noul ≥ 0.5` | `max(noul, 1 − noul)` |
 | choice | `choice` | `confidence` |
 | score | most probable level, where probability keys are level indices or labels | `confidence` |
+
+**System 2 model.** `openai/gpt-5.4-mini` with reasoning off and `maxOutputTokens` 600, set in `lib/models.ts`. Runs 1 and 2 used `anthropic/claude-sonnet-5`.
 
 **System 2 schema.** For each node there's one zod field: an enum over the choice keys, an integer level index, or a boolean. Each choice node also gets `<node>__new_option: string | null`, which is how the teacher proposes a category the reflex doesn't have. Reasoning is disabled, and `maxOutputTokens` is 600.
 
@@ -225,7 +229,7 @@ This endpoint returns the latest run in the chosen database. `db` is whitelisted
 
 This starts `runSurge({ reset: true })` in the background. It only works when `ALLOW_RUN=1`, and returns 403 otherwise. It isn't intended for serverless use.
 
-## 10. Dashboard (`app/page.tsx`)
+## 10. Dashboard (`app/details/page.tsx`) and story mode (`app/page.tsx`)
 
 - **One payload, rendered as of alert N.**
   - Live mode sets N to the last processed seq.
@@ -250,6 +254,21 @@ This starts `runSurge({ reset: true })` in the background. It only works when `A
   | `?node=<name>` | Open that node's detail panel |
 
   A read-only deployment replays a finished run automatically.
+
+**Story mode (`/`).**
+- It loads `/api/state?db=run3` once. Each chapter in `lib/story.ts` pins a frame (`at`), an optional animation start (`from`), a focus card and an example alert.
+- **Next**, the chapter pills, or ←/→ move between chapters; `?ch=N` opens one directly. A chapter with `from` animates the cursor from `from` to `at` over 2.6 s.
+- Each card shows one plain state:
+
+  | State | When |
+  | --- | --- |
+  | 🧠 Asking the LLM | The node is in shadow mode |
+  | ⚡ Reflex | The node is a reflex |
+  | ↩ Handed back to the LLM | The node is a reflex, but the example alert's decision fell back |
+  | ✎ Rewriting itself | The node is in shadow after a demotion or rewrite, with no promotion since |
+
+- A card shows chips for choice options that a rewrite added, e.g. `+ ai_agent_prompt_injection`.
+- The chapter-6 result numbers are constants taken from README → Results.
 
 ## 11. Operations
 
