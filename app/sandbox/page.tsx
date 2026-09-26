@@ -62,6 +62,8 @@ function fmtAnswer(a: Answer | null | undefined, q?: Question) {
   if (typeof a === "number" && Array.isArray(q?.criteria)) return (q.criteria[a] ?? String(a)).split(":")[0];
   return pretty(String(a));
 }
+// Confidence vs floor: add a third decimal when two decimals would hide which one is bigger.
+const vs = (a: number, b: number) => (a.toFixed(2) === b.toFixed(2) && a !== b ? `${a.toFixed(3)} vs ${b.toFixed(3)}` : `${a.toFixed(2)} vs ${b.toFixed(2)}`);
 const money = (x: number) => (x < 0.0001 ? `$${x.toFixed(5)}` : `$${x.toFixed(4)}`);
 const pct = (x: number | null | undefined) => (x == null ? "–" : `${Math.round(x * 100)}%`);
 
@@ -131,8 +133,7 @@ export default function Sandbox() {
 
   async function run() {
     if (choice === null || (choice === "custom" && !text.trim())) return;
-    timers.current.forEach(clearTimeout);
-    timers.current = [];
+    timers.current.splice(0).forEach(clearTimeout); // same array object, so the unmount cleanup still sees later timers
     setResult(null);
     setError(null);
     setBusy(true);
@@ -373,7 +374,7 @@ export default function Sandbox() {
                               <tr key={d.node}>
                                 <td className="py-2 font-medium">{NODE_LABEL[d.node]}</td>
                                 <td className="py-2 tabular-nums">
-                                  <Mark ok={conf >= cfg.confidence_floor} /> {conf.toFixed(2)} vs {cfg.confidence_floor.toFixed(2)}
+                                  <Mark ok={conf >= cfg.confidence_floor} /> {vs(conf, cfg.confidence_floor)}
                                 </td>
                                 <td className="py-2">
                                   {memEmpty ? <Mark ok={null} /> : <Mark ok={!mem.novel} />} {memEmpty ? "no memory" : mem.novel ? "no" : "yes"}
@@ -417,10 +418,10 @@ export default function Sandbox() {
                     </div>
                     <ul className="grid gap-x-6 gap-y-1.5 text-sm sm:grid-cols-2">
                       {result.decisions.map((d) => (
-                        <li key={d.node} className="flex items-center gap-2">
-                          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: WHO[d.used].color }} />
-                          <span className="w-32 shrink-0 text-ink-3">{NODE_LABEL[d.node]}</span>
-                          <span className="min-w-0 flex-1 truncate font-medium" title={fmtAnswer(d.final, q(d.node))}>{fmtAnswer(d.final, q(d.node))}</span>
+                        <li key={d.node} className="flex items-start gap-2">
+                          <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full" style={{ background: WHO[d.used].color }} />
+                          <span className="w-28 shrink-0 text-ink-3">{NODE_LABEL[d.node]}</span>
+                          <span className="min-w-0 flex-1 font-medium">{fmtAnswer(d.final, q(d.node))}</span>
                           {seeded && <span style={{ color: d.correct ? COLOR.reflex : COLOR.bad }}>{d.correct ? "✓" : "✗"}</span>}
                         </li>
                       ))}
