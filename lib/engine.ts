@@ -58,7 +58,7 @@ export function same(a: Answer | undefined, b: Answer | undefined) {
 }
 
 // Group nodes that share a context policy so each group is one Jev call (all in parallel).
-async function runSystem1(req: Request, nodes: [NodeName, NodeConfig][]) {
+export async function runSystem1(req: Request, nodes: [NodeName, NodeConfig][]) {
   const groups = new Map<string, [NodeName, NodeConfig][]>();
   for (const n of nodes) {
     const key = n[1].context.join(",");
