@@ -7,7 +7,7 @@ The scripts for the 60-second video, the live table demo, and judge Q&A. They fo
 | Window | Median decision | Cost per 1,000 alerts | Accuracy (held-out labels) | Alerts with no LLM call |
 | --- | --- | --- | --- | --- |
 | Baseline: first 20 alerts, all on the LLM | 886 ms | $1.03 | 95.8% | 0% |
-| Steady state: alerts #100–245 | — | **$0.40 (2.6× lower)** | 91.8% | **38%** |
+| Steady state: alerts #100–245 (81% of decisions off the LLM: 707 of 876) | — | **$0.40 (2.6× lower)** | 91.8% | **38%** |
 | All-reflex alerts only | **257 ms** (vs 890 ms all-LLM, 3.5×) | | | |
 
 With a frontier teacher (run 2, Sonnet 5), the reflex path is **10× faster**: 238 ms vs 2.4 s.
@@ -32,7 +32,7 @@ Record story mode with `npm run build && npm start`, Chrome at 1440×900, clicki
 | 0:20–0:28 | 3 · It corrects itself | "Page analyst?" ↓, then ✎, then ⚡ | "When a reflex gets unsure, it steps back, rewrites its own question, and earns its promotion again." |
 | 0:28–0:42 | 4 · Something new | Alert #246, handed back ↩ | "Then a new attack hits: a prompt-injected coding agent trying to read cloud credentials. Memory finds nothing similar, so the reflexes hand it to the LLM. No guessing." |
 | 0:42–0:50 | 5 · It rewrote itself | Category card: "+ ai_agent_prompt_injection" | "The harness adds a new attack category to its own taxonomy, and re-learns it." |
-| 0:50–1:00 | 6 · The result | 2.6× cheaper · 38% no-LLM at 257 ms · 96% → 92% | "Two point six times cheaper, and alerts handled by reflexes alone come back in a quarter second. Reflexes: agents that grow reflexes, and know when not to trust them." |
+| 0:50–1:00 | 6 · The result | 81% of decisions off the LLM · 2.6× cheaper · 96% → 92% | "Eighty-one percent of decisions moved off the LLM, two point six times cheaper, and alerts handled by reflexes alone come back in a quarter second. Reflexes: agents that grow reflexes, and know when not to trust them." |
 
 About 150 words. Rehearse it 3 times with a timer.
 
@@ -46,7 +46,7 @@ The app is a product console (Overview · Decisions · Memory · Harness history
 | 2 · It learned (30 s) | **Decisions** | Point at the green ⚡ cards and one threshold | "Reflexes shadowed each decision with Jev. Within 24 alerts, all six became reflexes. Each one set its own confidence threshold: it only acts alone where it agreed 100% with the LLM." |
 | 3 · It rewrote itself (30 s) | **Harness history** | Open the category rewrite at #325 | "Then attacks on AI agents started. The harness had no category for them, so it demoted that reflex, wrote a new category into its own question, and re-learned it. Every version is a MongoDB document." |
 | 4 · Try it live (45 s) | **Try it**, 3 presets | Click **Known attack**, then **Learned today**, then **Never seen** | Known: "Familiar attack: five of six decisions are reflexes, in milliseconds." Learned today: "This morning it had never seen prompt injection. Now it recognizes it, and here are the 3 similar alerts in MongoDB memory it's relying on." Never seen: "Something it has never seen: Vector Search finds nothing close, so all six go to the LLM. It knows what it doesn't know." |
-| 5 · Numbers (15 s) | Overview | Point at the KPI tiles | "2.6× cheaper per alert, 38% of alerts with no LLM call at 257 ms, and a 4-point accuracy trade we show openly." |
+| 5 · Numbers (15 s) | Overview | Point at the KPI tiles | "81% of decisions moved off the LLM, 2.6× cheaper per alert, 38% of alerts with no LLM call at all, and a 4-point accuracy trade we show openly." |
 | 6 · Hand over | Try it | Give the judge the keyboard | "Paste any alert you like." |
 
 **Presets (tested live):**
@@ -92,6 +92,6 @@ The app is a product console (Overview · Decisions · Memory · Harness history
 
 > AI agents send every small decision (classify, prioritize, route, check policy) to a slow, expensive LLM, forever. Reflexes is a self-improving harness that fixes this. Each decision point starts on an LLM (System 2) while Jev, TypeSafe AI's new System One model, shadows it. When Jev proves reliable on a decision, the harness promotes it to a ~250 ms reflex and sets its own confidence threshold from Jev's calibration. Before any reflex fires, MongoDB Atlas Vector Search (Automated Embedding) recalls similar past cases, so reflexes only act where they've earned trust. When the world changes, reflexes are demoted, and an evolver rewrites their questions (adding categories, changing context policy) before they re-graduate. Every change is a versioned harness document in MongoDB.
 >
-> Demo: a SOC agent triaging an alert storm, with 6 decisions per alert. Results: 2.6× lower cost per alert; 38% of alerts handled with no LLM call at 257 ms (10× faster than the LLM path with a frontier teacher); accuracy 96% → 92% on held-out labels. Mid-run, a new campaign of attacks on AI agents is flagged as unfamiliar, the affected reflexes hand off to the LLM, and the harness adds a new category to itself and recovers.
+> Demo: a SOC agent triaging an alert storm, with 6 decisions per alert. Results: 81% of decisions moved off the LLM; 2.6× lower cost per alert; 38% of alerts handled with no LLM call at 257 ms (10× faster than the LLM path with a frontier teacher); accuracy 96% → 92% on held-out labels. Mid-run, a new campaign of attacks on AI agents is flagged as unfamiliar, the affected reflexes hand off to the LLM, and the harness adds a new category to itself and recovers.
 >
 > Tracks: Recursive Harnessing (primary), Long Horizon Engineering. Stack: MongoDB Atlas (Vector Search, Automated Embedding, window functions), Jev and LLMs via OpenRouter, Vercel AI SDK, Next.js on Vercel.
