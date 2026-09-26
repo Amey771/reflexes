@@ -1,17 +1,21 @@
 @import "tailwindcss";
 
-/* Dark-first demo dashboard. Status colors are fixed and always paired with an icon + label. */
+/* Dark-first dashboard theme. Chart and status colors come from a validated palette
+   (categorical slots pass CVD and contrast checks against --surface-1). */
 :root {
   color-scheme: dark;
-  --page: #121211;
+  --page: #111110;
   --surface-1: #1a1a19;
-  --surface-2: #232321;
-  --border: #33332f;
+  --surface-2: #262624;
+  --border: #383835;
   --text-primary: #ffffff;
   --text-secondary: #c3c2b7;
-  --text-muted: #8d8c84;
+  --text-muted: #8f8e86;
+
   --series-1: #3987e5;
   --series-2: #d95926;
+
+  /* Node states (always shown with an icon + label, never color alone) */
   --status-good: #0ca30c;
   --status-warning: #fab219;
   --status-critical: #d03b3b;
@@ -28,10 +32,8 @@
   --color-ink-3: var(--text-muted);
   --color-good: var(--status-good);
   --color-warn: var(--status-warning);
-  --color-crit: var(--status-critical);
+  --color-bad: var(--status-critical);
   --color-think: var(--thinking);
-  --color-s1: var(--series-1);
-  --color-s2: var(--series-2);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
@@ -39,4 +41,9 @@
 body {
   background: var(--page);
   color: var(--text-primary);
+  font-family: var(--font-sans), system-ui, sans-serif;
+}
+
+.recharts-cartesian-axis-tick-value {
+  font-variant-numeric: tabular-nums;
 }

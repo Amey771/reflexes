@@ -1,19 +1,30 @@
+import type { Document } from "mongodb";
 import { getDb } from "@/lib/db";
-import { NODES, type Harness } from "@/lib/workload";
+import type { Harness } from "@/lib/workload";
 
 export const dynamic = "force-dynamic";
 
 const WINDOW = 20;
 
+// Alert texts never change, so read them once per server instance.
+let texts: Map<number, string> | null = null;
+
+// Returns the whole latest run. The dashboard renders the state "as of alert #N",
+// so the same payload drives both the live view and the replay.
 export async function GET() {
   const db = await getDb();
-  const harness = await db.collection<Harness>("harness_versions").find().sort({ version: -1 }).limit(1).next();
   const run = await db.collection("runs").find().sort({ started_at: -1 }).limit(1).next();
-  if (!run) return Response.json({ run: null, harness });
+  const canRun = process.env.ALLOW_RUN === "1";
+  if (!run) return Response.json({ run: null, canRun });
   const run_id = run._id;
 
-  const [series, nodeRows, events, recent, versions] = await Promise.all([
-    // Rolling metrics over the request stream, computed in MongoDB with window functions.
+  if (!texts) {
+    const rows = await db.collection("requests").find({}, { projection: { _id: 0, seq: 1, text: 1 } }).toArray();
+    texts = new Map(rows.map((r) => [r.seq as number, r.text as string]));
+  }
+
+  const [series, decisions, events, versions] = await Promise.all([
+    // Rolling metrics over the alert stream, computed in MongoDB with window functions.
     db
       .collection("results")
       .aggregate([
@@ -22,80 +33,59 @@ export async function GET() {
           $setWindowFields: {
             sortBy: { seq: 1 },
             output: {
-              ms: { $avg: "$ms", window: { documents: [-(WINDOW - 1), 0] } },
-              wait: { $avg: "$total_ms", window: { documents: [-(WINDOW - 1), 0] } },
-              cost: { $avg: "$cost", window: { documents: [-(WINDOW - 1), 0] } },
-              accuracy: { $avg: "$correct", window: { documents: [-(WINDOW - 1), 0] } },
-              reflex: { $avg: "$reflex_share", window: { documents: [-(WINDOW - 1), 0] } },
+              ms_avg: { $avg: "$ms", window: { documents: [-(WINDOW - 1), 0] } },
+              wait_avg: { $avg: "$total_ms", window: { documents: [-(WINDOW - 1), 0] } },
+              cost_avg: { $avg: "$cost", window: { documents: [-(WINDOW - 1), 0] } },
+              accuracy_avg: { $avg: "$correct", window: { documents: [-(WINDOW - 1), 0] } },
+              reflex_avg: { $avg: "$reflex_share", window: { documents: [-(WINDOW - 1), 0] } },
             },
           },
         },
-        { $project: { _id: 0, seq: 1, batch: 1, backlog: 1, ms: 1, wait: 1, cost: 1, accuracy: 1, reflex: 1 } },
+        {
+          $project: {
+            _id: 0,
+            seq: 1,
+            batch: 1,
+            novel: 1,
+            recall_top: 1,
+            action: 1,
+            ms: "$ms_avg",
+            wait: "$wait_avg",
+            cost: "$cost_avg",
+            accuracy: "$accuracy_avg",
+            reflex: "$reflex_avg",
+          },
+        },
       ])
       .toArray(),
-    // Per-node health over its most recent decisions.
     db
       .collection("decisions")
-      .aggregate([
-        { $match: { run_id } },
-        { $sort: { seq: -1 } },
-        { $group: { _id: "$node", recent: { $push: { agree: "$agree", used: "$used", conf: "$s1.confidence" } } } },
-        { $project: { recent: { $slice: ["$recent", 30] } } },
-      ])
+      .find({ run_id }, { projection: { _id: 0, seq: 1, node: 1, used: 1, agree: 1, audited: 1, mode: 1, v: "$harness_version", reason: "$fallback_reason", conf: "$s1.confidence" } })
+      .sort({ seq: 1 })
       .toArray(),
-    db.collection("events").find({ run_id }).sort({ ts: -1 }).limit(40).toArray(),
-    db.collection("results").find({ run_id }).sort({ seq: -1 }).limit(8).project({ _id: 0, seq: 1, action: 1, novel: 1, recall_top: 1, batch: 1 }).toArray(),
-    db.collection("harness_versions").countDocuments(),
+    db.collection("events").find({ run_id }, { projection: { run_id: 0 } }).sort({ ts: 1 }).toArray(),
+    db
+      .collection<Harness>("harness_versions")
+      .find({}, { projection: { _id: 0, version: 1, reason: 1, nodes: 1, created_at: 1 } })
+      .sort({ version: 1 })
+      .toArray(),
   ]);
 
-  const recentDecisions = await db
-    .collection("decisions")
-    .find({ run_id, seq: { $in: recent.map((r) => r.seq) } })
-    .project({ _id: 0, seq: 1, node: 1, used: 1, correct: 1, text: 1, fallback_reason: 1 })
-    .toArray();
-  const recentRows = recent.map((r) => {
-    const ds = recentDecisions.filter((d) => d.seq === r.seq);
-    return { ...r, text: ds[0]?.text ?? "", nodes: ds.map((d) => ({ node: d.node, used: d.used, correct: d.correct, reason: d.fallback_reason })) };
-  });
-
-  const nodes = Object.fromEntries(
-    NODES.map((n) => {
-      const recent = (nodeRows.find((r) => r._id === n)?.recent ?? []) as { agree?: boolean; used: string; conf?: number }[];
-      const withAgree = recent.filter((r) => r.agree !== undefined && r.agree !== null);
-      const confs = recent.map((r) => r.conf).filter((c): c is number => typeof c === "number");
-      return [
-        n,
-        {
-          mode: harness?.nodes[n].mode,
-          question: harness?.nodes[n].question,
-          agreement: withAgree.length ? withAgree.filter((r) => r.agree).length / withAgree.length : null,
-          samples: withAgree.length,
-          reflexShare: recent.length ? recent.filter((r) => r.used === "reflex").length / recent.length : 0,
-          confidence: confs.length ? confs.reduce((a, b) => a + b, 0) / confs.length : null,
-        },
-      ];
-    }),
-  );
-
-  const bySeq = [...series].sort((a, b) => a.seq - b.seq);
-  const avg = (rows: typeof series, k: string) => (rows.length ? rows.reduce((s, r) => s + (r[k] as number), 0) / rows.length : null);
-  const first = bySeq.slice(0, WINDOW);
-  const lastRows = bySeq.slice(-WINDOW);
-  const pick = (rows: typeof series) => ({
-    ms: avg(rows, "ms"),
-    wait: avg(rows, "wait"),
-    cost: avg(rows, "cost"),
-    accuracy: avg(rows, "accuracy"),
-    reflex: avg(rows, "reflex"),
-  });
+  const alerts = series.map((s: Document) => ({
+    seq: s.seq,
+    text: (texts!.get(s.seq) ?? "").slice(0, 220),
+    action: s.action,
+    novel: !!s.novel,
+    batch: s.batch,
+  }));
 
   return Response.json({
-    run: { status: run.status, processed: run.processed, total: run.total, started_at: run.started_at },
-    harness: { version: harness?.version, reason: harness?.reason, versions },
-    kpis: { before: pick(first.length ? [first[first.length - 1]] : []), now: pick(lastRows.length ? [lastRows[lastRows.length - 1]] : []) },
-    nodes,
-    series: bySeq,
-    events,
-    recent: recentRows,
+    run: { id: String(run_id), status: run.status, processed: run.processed, total: run.total, started_at: run.started_at },
+    canRun,
+    versions,
+    series: series.map(({ action: _a, ...rest }: Document) => rest),
+    decisions,
+    events: events.map((e) => ({ ...e, _id: String(e._id) })),
+    alerts,
   });
 }
