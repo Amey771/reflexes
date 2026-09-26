@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import ImpactCard from "@/app/impact";
 import { NODE_LABEL as LABELS, NODES } from "@/lib/workload";
 
 // ---------- payload types (from /api/state) ----------
@@ -463,6 +464,9 @@ export default function Overview() {
             <span className="text-ink" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{story.text}</span>
           </div>
 
+          <ImpactCard />
+
+          <div className="-mb-2 text-xs text-ink-3">At alert #{at}: rolling 20-alert window, compared with alert 20 when everything was on the LLM</div>
           <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
             <Tile
               label="Decision time per alert"

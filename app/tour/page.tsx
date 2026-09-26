@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import ImpactCard from "@/app/impact";
 import { CHAPTERS, LEGEND, PAIN, STORY_DB } from "@/lib/story";
 import { NODE_LABEL, NODES, type NodeName } from "@/lib/workload";
 
@@ -24,15 +25,6 @@ const STATE_COLOR: Record<CardState, string> = {
   rewriting: "var(--series-1)",
 };
 const SOURCE: Record<Dec["used"], CardState> = { system2: "llm", reflex: "reflex", fallback: "handedBack" };
-
-// Result numbers from the recorded runs (see README → Results).
-const RESULTS = [
-  { label: "Cost per 1,000 alerts", value: "$1.03 → $0.40", note: "2.6× cheaper" },
-  { label: "Alerts with no LLM call", value: "0% → 38%", note: "all six decisions by reflexes" },
-  { label: "All-reflex alert", value: "257 ms", note: "vs 890 ms on the LLM (3.5×)" },
-  { label: "With a frontier LLM", value: "238 ms", note: "vs 2.4 s (10×, earlier run)" },
-  { label: "Accuracy", value: "95.8% → 91.8%", note: "the trade, measured on labels it never sees" },
-];
 
 const WINDOW = 20;
 const ANIM_MS = 2600;
@@ -191,7 +183,7 @@ export default function Story() {
 
       <section>
         <p className="text-[30px] font-semibold leading-tight tracking-tight">{ch.caption}</p>
-        <p className="mt-1.5 text-[13.5px] text-ink-3">{ch.proof}</p>
+        {!isResult && <p className="mt-1.5 text-[13.5px] text-ink-3">{ch.proof}</p>}
       </section>
 
       {loading ? (
@@ -278,17 +270,7 @@ export default function Story() {
         </section>
       )}
 
-      {isResult && (
-        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
-          {RESULTS.map((r) => (
-            <div key={r.label} className="rounded-xl border border-line bg-surface-1 p-4">
-              <div className="text-sm text-ink-3">{r.label}</div>
-              <div className="mt-1 text-[28px] font-bold leading-tight tabular-nums">{r.value}</div>
-              <div className="mt-1 text-xs text-ink-3">{r.note}</div>
-            </div>
-          ))}
-        </section>
-      )}
+      {isResult && <ImpactCard compact />}
 
       <footer className="mt-auto flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-4 text-sm text-ink-3">
         {(Object.keys(LEGEND) as CardState[]).map((k) => (
