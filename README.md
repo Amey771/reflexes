@@ -6,6 +6,7 @@
 - **Live dashboard (replays a recorded run):** TODO
 - Built solo at the MongoDB x Cerebral Valley *Harness Engineering & Model Wrangling* hackathon, NYC, Sep 26 2026.
 - **Tracks:** Recursive Harnessing (primary), Long Horizon Engineering (secondary).
+- **Design docs:** [High-level design](docs/HLD.md) · [Low-level design](docs/LLD.md)
 
 ## The problem
 
@@ -120,12 +121,16 @@ The harness decides, **per decision point and per alert**, which system answers.
 ```bash
 cp .env.example .env.local     # MONGODB_URI (Atlas), MONGODB_DB, OPENROUTER_API_KEY, ALLOW_RUN=1
 npm install
-npm run jev                    # Jev connectivity check
+npx tsx scripts/check.ts       # Atlas + OpenRouter connectivity (prints no secrets)
+npm run jev                    # Jev smoke test
 npx tsx scripts/index.ts       # create the auto-embedding vector index
 npm run seed                   # load the 450 labeled alerts (cached in data/alerts.json)
-npm run run                    # stream the alert storm through the harness
+npm run run -- --limit 360     # stream the alert storm through the harness (resets run collections)
+npx tsx scripts/archive.ts reflexes_run4   # archive the run before the next one
 npm run dev                    # dashboard at http://localhost:3000
 ```
+
+**Replay a recorded run:** `/?db=run3&replay=1&speed=2`. **Freeze a moment:** `/?db=run3&at=330&node=category`. Operations and failure modes are covered in [LLD §11–12](docs/LLD.md#11-operations).
 
 ## Built with
 
