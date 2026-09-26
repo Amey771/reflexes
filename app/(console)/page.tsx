@@ -466,7 +466,7 @@ export default function Overview() {
 
           <ImpactCard />
 
-          <div className="-mb-2 text-xs text-ink-3">At alert #{at}: rolling 20-alert window, compared with alert 20 when everything was on the LLM</div>
+          <div className="text-xs text-ink-3">At alert #{at}: rolling 20-alert window, compared with alert 20 when everything was on the LLM</div>
           <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
             <Tile
               label="Decision time per alert"
