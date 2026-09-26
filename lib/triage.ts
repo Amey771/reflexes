@@ -40,6 +40,19 @@ const DEFAULT_FACTS: Facts = {
   repeated_today: false,
 };
 
+// Public input: accept only the known fact keys with the right types, nothing else.
+function cleanFacts(raw: unknown): Facts {
+  const f = (raw && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
+  const bool = (k: keyof Facts) => (typeof f[k] === "boolean" ? (f[k] as boolean) : (DEFAULT_FACTS[k] as boolean));
+  return {
+    asset_criticality: f.asset_criticality === "high" ? "high" : "low",
+    user_privileged: bool("user_privileged"),
+    threat_intel_match: bool("threat_intel_match"),
+    off_hours: bool("off_hours"),
+    repeated_today: bool("repeated_today"),
+  };
+}
+
 export async function triageAlert(input: { text: string; facts?: Partial<Facts> }): Promise<TriageResult> {
   const t0 = performance.now();
   const text = input.text.trim().slice(0, 4000);
@@ -47,7 +60,7 @@ export async function triageAlert(input: { text: string; facts?: Partial<Facts> 
   const db = await getDb();
   const h = (await db.collection<Harness>("harness_versions").find().sort({ version: -1 }).limit(1).next())!;
   const run = await db.collection("runs").find().sort({ started_at: -1 }).limit(1).next();
-  const req: Request = { seq: -1, batch: "base", text, facts: { ...DEFAULT_FACTS, ...input.facts }, truth: {} as Request["truth"] };
+  const req: Request = { seq: -1, batch: "base", text, facts: cleanFacts(input.facts), truth: {} as Request["truth"] };
 
   const all = NODES.map((n) => [n, h.nodes[n]] as const);
   const [s1, hits, tops] = await Promise.all([
