@@ -3,7 +3,7 @@
 **Agents that grow reflexes.** An agent harness that learns from its own experience and moves each decision from an LLM to a System One reflex (about 250 ms for an all-reflex alert) once the decision has proven reliable. It demotes and rewrites that reflex when the world changes. In our final run, **81% of decisions moved off the LLM** within ~24 alerts. That cut cost per alert 2.6× for a 4-point accuracy trade, and the harness taught itself a new attack category when a campaign appeared.
 
 - **Demo video (1 min):** TODO
-- **Live app:** https://reflexes-omega.vercel.app. `/` is the Reflexes console: Overview, Decisions, Memory, Harness history, and **Try it**, where you paste an alert and the learned harness triages it live ([try a preset](https://reflexes-omega.vercel.app/try?preset=2)). [`/tour`](https://reflexes-omega.vercel.app/tour) is a six-chapter product tour.
+- **Live app:** https://reflexes-omega.vercel.app. `/` is the Reflexes console: Overview, Decisions, Memory, Harness history, and **Try it**, where you paste an alert and the learned harness triages it live ([try a preset](https://reflexes-omega.vercel.app/try?preset=2)). [`/sandbox`](https://reflexes-omega.vercel.app/sandbox) follows one alert through the *full* engine (memory, Jev, the routing checks and the LLM), stage by stage, graded against the hidden label. [`/tour`](https://reflexes-omega.vercel.app/tour) is a six-chapter product tour.
 - Built solo at the MongoDB x Cerebral Valley *Harness Engineering & Model Wrangling* hackathon, NYC, Sep 26 2026.
 - **Tracks:** Recursive Harnessing (primary), Long Horizon Engineering (secondary).
 - **Docs:** [High-level design](docs/HLD.md) · [Low-level design](docs/LLD.md) · [Demo guide](docs/DEMO.md)

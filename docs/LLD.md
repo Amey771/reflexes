@@ -229,6 +229,17 @@ This endpoint returns the latest run in the chosen database. `db` is whitelisted
 - **Caching.** Finished runs are served with `s-maxage=30, stale-while-revalidate=300`; live runs use `no-store`.
 - **Alert texts** are cached per database in the server process.
 
+### `GET` / `POST /api/sandbox`
+
+This runs one alert through the **real** `processRequest` against the latest harness and the latest run's experience memory. Decisions that are still learning, or reflexes that step aside, call the LLM. It is **read-only**: it never writes to MongoDB, and background audits are off (`opts.audit = false`).
+
+- **Gate:** enabled only when `ALLOW_SANDBOX=1` or `ALLOW_RUN=1`; otherwise `GET` returns `{ enabled: false, message }` and `POST` returns 403.
+- **`GET`:** `{ enabled, samples }`, the first 4 base and first 4 campaign alerts from `requests`.
+- **`POST`:** `{ seq }` for a seeded alert (which has hidden labels) or `{ text, facts }` for a custom one (1,000 characters, facts whitelisted). A seeded alert's own past record is excluded from memory recall.
+- **Response:** `alert` · `harness` (version and per-node mode, floor, context, question) · `memory` (experiences, top, novel, novel_below, trust, neighbors with text, rules) · `trace` (recall_ms, s1_ms/cost, s2_learning, s2_fallback) · `decisions` · `action` · `totals`.
+- **Limits:** one run at a time per instance (409 while busy) and 10 runs per IP per minute (429).
+- **Memory outside the runner:** `Memory.forRun(run_id)` rebuilds the novelty state from the run: the experience count, plus the last 150 `results.recall_top` values.
+
 ### `POST /api/triage`
 
 The request is `{ text, facts? }`. Jev answers all six questions under the latest harness, and `$vectorSearch` over the live experience memory gives novelty, trust and the top 3 neighbors. **No LLM is called**; decisions that would need one come back as `handed_back` or `llm_learning`. It costs about $0.00004 per call.

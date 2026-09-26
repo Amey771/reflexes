@@ -50,6 +50,7 @@ Built solo for the MongoDB x Cerebral Valley "Harness Engineering & Model Wrangl
 app/(console)/             the product console: shell (sidebar, run picker), Overview (/), decisions, memory, history, try
 app/tour/page.tsx          product tour: six chapters pinned to run-3 moments (?ch=N, ←/→)
 app/api/triage, similar    live triage of a pasted alert (Jev + Vector Search, no LLM); memory search
+app/sandbox, api/sandbox   one alert through the full engine (incl. LLM), stage by stage; read-only; needs ALLOW_SANDBOX=1 or ALLOW_RUN=1
 lib/story.ts               story chapters, pain line, plain-language legend
 app/api/state/route.ts     whole-run read API (+ archive whitelist, CDN cache for finished runs)
 app/api/run/route.ts       local-only run trigger (ALLOW_RUN=1)
