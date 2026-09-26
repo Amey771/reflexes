@@ -196,8 +196,10 @@ function RewriteDiff({ e }: { e: Ev }) {
   const bq = e.before?.question ?? (e.before as Question | undefined);
   const aq = e.after?.question;
   if (!bq || !aq) return null;
-  const bk = criteriaKeys(bq);
-  const ak = criteriaKeys(aq);
+  // Only choice options diff; score levels are rewritten descriptions, not added options.
+  const optionKeys = (q: Question) => (Array.isArray(q.criteria) ? [] : criteriaKeys(q));
+  const bk = optionKeys(bq);
+  const ak = optionKeys(aq);
   const added = ak.filter((k) => !bk.includes(k));
   const removed = bk.filter((k) => !ak.includes(k));
   const bc = e.before?.context;

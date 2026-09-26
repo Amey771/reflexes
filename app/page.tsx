@@ -37,7 +37,8 @@ const RESULTS = [
 const WINDOW = 20;
 const ANIM_MS = 2600;
 const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
-const keys = (q?: Question) => (!q?.criteria ? [] : Array.isArray(q.criteria) ? q.criteria : Object.keys(q.criteria));
+// Option names of a choice question (score levels are descriptions, not options, so they never diff).
+const keys = (q?: Question) => (!q?.criteria || Array.isArray(q.criteria) ? [] : Object.keys(q.criteria));
 
 export default function Story() {
   const [data, setData] = useState<Payload | null>(null);
@@ -151,7 +152,7 @@ export default function Story() {
   const isResult = ch.id === "result";
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col gap-5 p-6">
+    <main className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col gap-4 px-6 py-5">
       <header className="flex flex-wrap items-center justify-between gap-4">
         <h1 className="text-3xl font-bold tracking-tight">
           Reflexes <span className="font-normal text-ink-2">· agents that grow reflexes</span>
@@ -198,7 +199,7 @@ export default function Story() {
           {/* Security alert */}
           <div className="flex flex-col rounded-xl border border-line bg-surface-1 p-4">
             <div className="mb-2 text-sm text-ink-3">Security alert #{view.exampleSeq}</div>
-            <pre className="max-h-52 flex-1 overflow-hidden whitespace-pre-wrap rounded-lg bg-surface-2 p-3 font-mono text-[13px] leading-relaxed text-ink">{view.alert?.text ?? "…"}</pre>
+            <pre className="max-h-44 flex-1 overflow-hidden whitespace-pre-wrap rounded-lg bg-surface-2 p-3 font-mono text-[13px] leading-relaxed text-ink">{view.alert?.text ?? "…"}</pre>
             <ul className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
               {NODES.map((n) => {
                 const used = view.example.find((d) => d.node === n)?.used;
@@ -237,7 +238,7 @@ export default function Story() {
                   {added.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {added.map((k) => (
-                        <span key={k} className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-good">+ {k}</span>
+                        <span key={k} className="whitespace-nowrap rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-good">+ {k}</span>
                       ))}
                     </div>
                   )}
