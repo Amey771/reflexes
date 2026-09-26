@@ -57,6 +57,7 @@ export async function GET(req: Request) {
             recall_top: 1,
             action: 1,
             ms: "$ms_avg",
+            ms_raw: "$ms",
             wait: "$wait_avg",
             cost: "$cost_avg",
             accuracy: "$accuracy_avg",

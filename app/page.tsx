@@ -8,7 +8,7 @@ import { NODE_LABEL as LABELS, NODES } from "@/lib/workload";
 type Question = { type: string; instructions: string; criteria?: Record<string, string> | string[] };
 type NodeCfg = { mode: "shadow" | "reflex"; question: Question; context: string[]; thresholds: { confidence_floor: number } };
 type Version = { version: number; reason: string; nodes: Record<string, NodeCfg> };
-type Point = { seq: number; batch: string; novel?: boolean; recall_top?: number | null; ms: number; wait: number; cost: number; accuracy: number; reflex: number };
+type Point = { seq: number; batch: string; novel?: boolean; recall_top?: number | null; ms: number; ms_raw?: number; wait: number; cost: number; accuracy: number; reflex: number; noLlm?: number };
 type Dec = { seq: number; node: string; used: "system2" | "reflex" | "fallback"; agree?: boolean | null; audited?: boolean; mode: string; v: number; reason?: string; conf?: number };
 type Ev = {
   _id: string;
@@ -47,7 +47,7 @@ function ratio(before: number | null | undefined, now: number | null | undefined
 }
 
 // ---------- small components ----------
-function Tile({ label, now, before, fmt, better }: { label: string; now?: number | null; before?: number | null; fmt: (v: number | null | undefined) => string; better?: string | null }) {
+function Tile({ label, now, before, fmt, better, note }: { label: string; now?: number | null; before?: number | null; fmt: (v: number | null | undefined) => string; better?: string | null; note?: string | null }) {
   return (
     <div className="rounded-xl border border-line bg-surface-1 p-4">
       <div className="text-sm text-ink-3">{label}</div>
@@ -56,6 +56,7 @@ function Tile({ label, now, before, fmt, better }: { label: string; now?: number
         <span className="tabular-nums">was {fmt(before)}</span>
         {better && <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-good">▼ {better}</span>}
       </div>
+      {note && <div className="mt-1 text-xs text-ink-3">{note}</div>}
     </div>
   );
 }
@@ -346,13 +347,24 @@ export default function Dashboard() {
       };
     }
 
+    // An alert skips the LLM entirely only when all six decisions were served by reflexes.
+    const reflexCount = new Map<number, number>();
+    for (const d of decisions) if (d.used === "reflex") reflexCount.set(d.seq, (reflexCount.get(d.seq) ?? 0) + 1);
+    const full = seriesAt.map((p) => (reflexCount.get(p.seq) ?? 0) === NODE_ORDER.length);
+    for (let i = 0; i < seriesAt.length; i++) {
+      const w = full.slice(Math.max(0, i - WINDOW + 1), i + 1);
+      seriesAt[i] = { ...seriesAt[i], noLlm: w.filter(Boolean).length / w.length };
+    }
+    const fastMs = seriesAt.filter((p, i) => full[i] && typeof p.ms_raw === "number").map((p) => p.ms_raw as number).sort((a, b) => a - b);
+    const reflexPathMs = fastMs.length >= 5 ? fastMs[Math.floor(fastMs.length / 2)] : null;
+
     const before = seriesAt.length >= WINDOW ? seriesAt[WINDOW - 1] : seriesAt[0];
     const now = seriesAt[seriesAt.length - 1];
     const recentAlerts = (data?.alerts ?? []).filter((a) => a.seq <= at).slice(-7).reverse();
     const decBySeq = new Map<number, Dec[]>();
     for (const d of decisions.filter((d) => recentAlerts.some((a) => a.seq === d.seq))) decBySeq.set(d.seq, [...(decBySeq.get(d.seq) ?? []), d]);
     const campaignSeq = seriesAt.find((p) => p.batch === "campaign")?.seq ?? null;
-    return { seriesAt, eventsAt, harness, nodes, before, now, recentAlerts, decBySeq, campaignSeq, versionCount: vAt + 1 };
+    return { seriesAt, eventsAt, harness, nodes, before, now, recentAlerts, decBySeq, campaignSeq, versionCount: vAt + 1, reflexPathMs };
   }, [series, data, at]);
 
   async function start() {
@@ -447,11 +459,18 @@ export default function Dashboard() {
           </div>
 
           <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-            <Tile label="Time to triage (incl. queue)" now={k?.wait} before={b?.wait} fmt={fmtMs} better={ratio(b?.wait, k?.wait)} />
-            <Tile label="Decision time per alert" now={k?.ms} before={b?.ms} fmt={fmtMs} better={ratio(b?.ms, k?.ms)} />
-            <Tile label="Cost per 1,000 alerts" now={k?.cost} before={b?.cost} fmt={fmtCost} better={ratio(b?.cost, k?.cost)} />
-            <Tile label="Accuracy vs ground truth" now={k?.accuracy} before={b?.accuracy} fmt={fmtPct} />
+            <Tile
+              label="Decision time per alert"
+              now={k?.ms}
+              before={b?.ms}
+              fmt={fmtMs}
+              better={ratio(b?.ms, k?.ms)}
+              note={view.reflexPathMs != null ? `all-reflex alerts: ${fmtMs(view.reflexPathMs)} (median)` : null}
+            />
+            <Tile label="Cost per 1,000 alerts" now={k?.cost} before={b?.cost} fmt={fmtCost} better={ratio(b?.cost, k?.cost)} note="incl. background audits" />
+            <Tile label="Accuracy vs ground truth" now={k?.accuracy} before={b?.accuracy} fmt={fmtPct} note="labels never shown to the engine" />
             <Tile label="Decisions on reflex" now={k?.reflex} before={b?.reflex} fmt={fmtPct} />
+            <Tile label="Alerts with no LLM call" now={k?.noLlm} before={b?.noLlm} fmt={fmtPct} note="all 6 decisions made by Jev" />
           </section>
 
           <section className="rounded-xl border border-line bg-surface-1/40 p-4">
@@ -514,21 +533,22 @@ export default function Dashboard() {
               xMax={total}
             />
             <Chart
-              title="Time to triage, including queue"
-              data={view.seriesAt}
-              lines={[{ key: "wait", name: "Time to triage", color: "var(--series-1)" }]}
-              fmt={(v) => fmtMs(v)}
-              events={view.eventsAt}
-              campaignSeq={view.campaignSeq}
-              xMax={total}
-            />
-            <Chart
               title="Decision time per alert"
               data={view.seriesAt}
               lines={[{ key: "ms", name: "Decision time", color: "var(--series-1)" }]}
               fmt={(v) => fmtMs(v)}
               events={view.eventsAt}
               campaignSeq={view.campaignSeq}
+              xMax={total}
+            />
+            <Chart
+              title="Alerts decided with no LLM call (rolling 20)"
+              data={view.seriesAt}
+              lines={[{ key: "noLlm", name: "No LLM call", color: "var(--series-1)" }]}
+              fmt={(v) => fmtPct(v)}
+              events={view.eventsAt}
+              campaignSeq={view.campaignSeq}
+              domain={[0, 1]}
               xMax={total}
             />
             <Chart
