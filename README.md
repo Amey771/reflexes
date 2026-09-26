@@ -1,6 +1,6 @@
 # Reflexes
 
-**Agents that grow reflexes.** An agent harness that learns from its own experience and moves each decision from a slow LLM to a ~300 ms System One reflex once the decision has proven reliable. It demotes and rewrites that reflex when the world changes. The longer it runs, the faster and cheaper it gets, without losing accuracy.
+**Agents that grow reflexes.** An agent harness that learns from its own experience and moves each decision from an LLM to a System One reflex (about 250 ms for an all-reflex alert) once the decision has proven reliable. It demotes and rewrites that reflex when the world changes. In our run it cut cost per alert 2.6× for a 4-point accuracy trade, and it taught itself a new attack category when a campaign appeared.
 
 - **Demo video (1 min):** TODO
 - **Live dashboard (replays a recorded run):** TODO
@@ -20,26 +20,37 @@ The usual fix is manual. Engineers hand-pick which steps to move to cheaper mode
 The demo agent triages security alerts. Every alert passes through six decisions: **attack type, severity, false positive?, page an analyst?, playbook, safe to auto-fix?** Reflexes wraps each decision point and manages it on its own:
 
 1. **Shadow.** A decision starts on System 2, an LLM with structured output. Jev, TypeSafe AI's [System One model](https://typesafe.ai/blog/introducing-system-one-models-and-jev), answers the same typed question in parallel. It returns calibrated probabilities in about 270 ms and generates no text. Every outcome is written to MongoDB.
-2. **Graduate.** When Jev agrees with the LLM on at least 90% of the last 20 decisions, the decision point is promoted to a **reflex**. The harness then sets its own **confidence floor** from Jev's calibration history: the lowest confidence above which agreement stays at 95% or more.
+2. **Graduate, calibrated.** The harness looks at the last 20 shadow decisions. It finds the lowest Jev confidence at which Jev agrees with the LLM on at least 97% of the cases above it, covering at least 60% of cases. If such a floor exists, the decision point is promoted to a **reflex** with that **confidence floor**, for example: "agrees 100% on the 80% of cases it is confident about (floor 0.86)".
 3. **Recall before acting.** Before a reflex fires, **Atlas Vector Search** recalls the most similar past alerts from experience memory. A reflex acts only if the alert looks like something the harness has seen and the reflex proved reliable on those similar alerts. Otherwise the decision goes back to the LLM. *Reflexes only fire where they've earned trust.*
-4. **Audit.** A sample of reflex decisions is re-checked by the LLM in the background.
+4. **Audit.** About 8% of alerts have their reflex decisions re-checked by the LLM in the background, off the latency path. Audit cost is included in the cost figures.
 5. **Demote and rewrite.** When a new pattern appears, confidence and audit agreement drop and the reflex is demoted. The **evolver** then rewrites the reflex's own question, adding the categories the LLM kept proposing and changing which inputs the reflex sees. It does this from a Vector Search cluster of the problem cases. The node relearns in shadow and graduates again.
 
 Every change is saved as a new **harness version** in MongoDB, with its parent and the reason for the change.
 
 ## Results
 
-TODO, from the final recorded run (450 alerts; the AI-agent-attack campaign starts at alert #246):
+From the final recorded run: 360 alerts, with the AI-agent-attack campaign starting at alert #246. The teacher is `openai/gpt-5.4-mini`. All numbers come straight from MongoDB.
 
-| Metric | Start (all on LLM) | End | Change |
-| --- | --- | --- | --- |
-| Decision time per alert | TODO | TODO | TODO |
-| Time to triage, including queue | TODO | TODO | TODO |
-| Cost per 1,000 alerts | TODO | TODO | TODO |
-| Accuracy vs ground-truth labels | TODO | TODO | TODO |
-| Decisions handled by reflexes | 0% | TODO | |
+| Phase | Decision time | Cost per 1,000 alerts | Accuracy vs labels | Decisions on reflex | Alerts with no LLM call |
+| --- | --- | --- | --- | --- | --- |
+| Start: everything on the LLM (alerts 0–18) | 887 ms | $1.03 | 95.6% | 0% | 0% |
+| **Graduated, before the campaign (100–245)** | 791 ms | **$0.40 (2.6× lower)** | **91.8%** | 81% | 38% |
+| New campaign, before the rewrite (246–324) | 1,009 ms | $0.87 | 80.6% | 62% | 1% |
+| After the harness added a category (325–359) | 910 ms | $0.96 | 80.0% | 63% | 11% |
 
-The ground-truth labels are never shown to the engine. It only learns from the LLM and from its own audits. The labels exist only to show that accuracy holds.
+- **Alerts decided entirely by reflexes take 257 ms (median), versus 890 ms on the LLM: 3.5× faster.** In an earlier run with a frontier teacher (Claude Sonnet 5), it was 238 ms versus about 2.4 s, 10× faster.
+- **All six decision points graduated by alert #24.** Each one set its own confidence floor, between 0.65 and 0.91.
+- **The harness rewrote its own questions three times.**
+  - "Page analyst?": demoted at #54, rewritten at #71, re-graduated at #93 with 100% coverage.
+  - "Severity": demoted by audits at #245, rewritten at #267, re-graduated at #291.
+- **Drift:** Atlas Vector Search flagged the campaign's alerts as unlike anything in memory (#261, #270, #282), and they were handed to the LLM. Jev's confidence on "attack type" collapsed, so the harness demoted it at #294. It then **added a new category, `ai_agent_prompt_injection`,** at #325 and re-graduated at #347.
+- 16 harness versions are stored in MongoDB, each with its parent and the reason for the change.
+
+**Honest caveats**
+
+- Average decision time only improves about 10%. When a reflex isn't confident, Jev runs first and then the LLM, so those alerts are slower than using the LLM alone. The fix is to start the LLM in parallel for nodes with low recent confidence.
+- Accuracy on reflexes dips about 4 points before the drift. The engine never sees the labels; it only learns from the LLM and its own audits.
+- The run ends 35 alerts after the new category appears, so full recovery isn't shown.
 
 ## Architecture
 
@@ -80,8 +91,8 @@ flowchart LR
 All models go through **one OpenRouter key**:
 
 - **System 1:** Jev (`jev-1.13`) through OpenRouter's System One endpoint. One fan-out call answers all six typed questions (choice, score, yes/no) with calibrated probabilities.
-- **System 2:** `openai/gpt-5.4-mini`, with structured output through the Vercel AI SDK.
-- **Evolver:** `anthropic/claude-sonnet-5`. Called rarely, only to rewrite a reflex.
+- **System 2 (teacher):** `openai/gpt-5.4-mini`, with structured output through the Vercel AI SDK. An earlier run used `anthropic/claude-sonnet-5`.
+- **Evolver:** `anthropic/claude-sonnet-5`, with reasoning off. Called rarely, only to rewrite a reflex (at most 2 rewrites per decision).
 
 The harness decides, **per decision point and per alert**, which system answers.
 
