@@ -1,620 +1,301 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
-import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
-import { NODE_LABEL as LABELS, NODES } from "@/lib/workload";
+import Link from "next/link";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CHAPTERS, LEGEND, PAIN, STORY_DB } from "@/lib/story";
+import { NODE_LABEL, NODES, type NodeName } from "@/lib/workload";
 
-// ---------- payload types (from /api/state) ----------
-type Question = { type: string; instructions: string; criteria?: Record<string, string> | string[] };
-type NodeCfg = { mode: "shadow" | "reflex"; question: Question; context: string[]; thresholds: { confidence_floor: number } };
-type Version = { version: number; reason: string; nodes: Record<string, NodeCfg> };
-type Point = { seq: number; batch: string; novel?: boolean; recall_top?: number | null; ms: number; ms_raw?: number; wait: number; cost: number; accuracy: number; reflex: number; noLlm?: number };
-type Dec = { seq: number; node: string; used: "system2" | "reflex" | "fallback"; agree?: boolean | null; audited?: boolean; mode: string; v: number; reason?: string; conf?: number };
-type Ev = {
-  _id: string;
-  type: "promote" | "demote" | "rewrite" | "novel";
-  node: string | null;
-  detail: string;
-  version: number;
-  seq: number;
-  before?: { question?: Question; context?: string[] } & Question;
-  after?: { question?: Question; context?: string[] };
-};
-type Alert = { seq: number; text: string; action: string; novel: boolean; batch: string };
-type Payload = {
-  run: { id: string; status: string; processed: number; total: number } | null;
-  canRun: boolean;
-  versions?: Version[];
-  series?: Point[];
-  decisions?: Dec[];
-  events?: Ev[];
-  alerts?: Alert[];
-};
+// Story mode: the recorded run told in six chapters, each pinned to a real moment.
+// Same data as /details, rendered for a 10-second read: plain words, one sentence, big states.
 
-const NODE_ORDER: string[] = [...NODES];
-const NODE_LABEL: Record<string, string> = LABELS;
+type Question = { instructions: string; criteria?: Record<string, string> | string[] };
+type Version = { version: number; nodes: Record<string, { mode: "shadow" | "reflex"; question: Question }> };
+type Dec = { seq: number; node: string; used: "system2" | "reflex" | "fallback" };
+type Ev = { _id: string; type: "promote" | "demote" | "rewrite" | "novel"; node: string | null; version: number; seq: number; before?: { question?: Question }; after?: { question?: Question } };
+type Point = { seq: number; cost: number };
+type Alert = { seq: number; text: string; action: string };
+type Payload = { versions?: Version[]; decisions?: Dec[]; events?: Ev[]; series?: Point[]; alerts?: Alert[] };
+
+type CardState = keyof typeof LEGEND;
+const STATE_COLOR: Record<CardState, string> = {
+  llm: "var(--thinking)",
+  reflex: "var(--status-good)",
+  handedBack: "var(--status-warning)",
+  rewriting: "var(--series-1)",
+};
+const SOURCE: Record<Dec["used"], CardState> = { system2: "llm", reflex: "reflex", fallback: "handedBack" };
+
+// Result numbers from the recorded runs (see README → Results).
+const RESULTS = [
+  { label: "Cost per 1,000 alerts", value: "$1.03 → $0.40", note: "2.6× cheaper" },
+  { label: "Alerts with no LLM call", value: "0% → 38%", note: "all six decisions by reflexes" },
+  { label: "All-reflex alert", value: "257 ms", note: "vs 890 ms on the LLM (3.5×)" },
+  { label: "With a frontier LLM", value: "238 ms", note: "vs 2.4 s (10×, earlier run)" },
+  { label: "Accuracy", value: "95.8% → 91.8%", note: "the trade, measured on labels it never sees" },
+];
+
 const WINDOW = 20;
+const ANIM_MS = 2600;
+const ease = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
+const keys = (q?: Question) => (!q?.criteria ? [] : Array.isArray(q.criteria) ? q.criteria : Object.keys(q.criteria));
 
-const fmtMs = (v: number | null | undefined) => (v == null ? "–" : v >= 1000 ? `${(v / 1000).toFixed(1)} s` : `${Math.round(v)} ms`);
-const fmtPct = (v: number | null | undefined) => (v == null ? "–" : `${Math.round(v * 100)}%`);
-const fmtCost = (v: number | null | undefined) => (v == null ? "–" : `$${(v * 1000).toFixed(2)}`);
-const rate = (xs: boolean[]) => (xs.length ? xs.filter(Boolean).length / xs.length : null);
-
-function ratio(before: number | null | undefined, now: number | null | undefined) {
-  if (!before || !now) return null;
-  const r = before / now;
-  return r >= 1.2 ? `${r.toFixed(r >= 10 ? 0 : 1)}× lower` : null;
-}
-
-// ---------- small components ----------
-function Tile({ label, now, before, fmt, better, note }: { label: string; now?: number | null; before?: number | null; fmt: (v: number | null | undefined) => string; better?: string | null; note?: string | null }) {
-  return (
-    <div className="rounded-xl border border-line bg-surface-1 p-4">
-      <div className="text-sm text-ink-3">{label}</div>
-      <div className="mt-1 text-4xl font-semibold tabular-nums tracking-tight">{fmt(now)}</div>
-      <div className="mt-2 flex items-center gap-2 text-sm text-ink-2">
-        <span className="tabular-nums">was {fmt(before)}</span>
-        {better && <span className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-good">▼ {better}</span>}
-      </div>
-      {note && <div className="mt-1 text-xs text-ink-3">{note}</div>}
-    </div>
-  );
-}
-
-type NodeView = { mode: "shadow" | "reflex"; demoted: boolean; agreement: number | null; samples: number; audits: number; reflexShare: number; confidence: number | null; floor: number };
-
-function nodeStatus(n: NodeView) {
-  if (n.demoted && n.mode === "shadow") return { label: "Demoted · relearning", icon: "↓", color: "var(--status-critical)" };
-  if (n.mode === "reflex") return { label: "Reflex", icon: "⚡", color: "var(--status-good)" };
-  if (n.samples >= 5) return { label: `Learning ${fmtPct(n.agreement)}`, icon: "◐", color: "var(--status-warning)" };
-  return { label: "Thinking", icon: "●", color: "var(--thinking)" };
-}
-
-function NodeCard({ name, n, selected, onClick }: { name: string; n: NodeView; selected: boolean; onClick: () => void }) {
-  const s = nodeStatus(n);
-  const bar = n.mode === "reflex" ? n.reflexShare : n.agreement ?? 0;
-  return (
-    <button
-      onClick={onClick}
-      className={`rounded-xl border bg-surface-1 p-4 text-left transition-colors ${selected ? "border-ink-2" : "border-line hover:border-ink-3"}`}
-      style={{ boxShadow: n.mode === "reflex" ? "inset 0 0 0 1px var(--status-good)" : undefined }}
-    >
-      <div className="text-base font-medium">{NODE_LABEL[name]}</div>
-      <div className="mt-2 inline-flex items-center gap-1.5 rounded-full bg-surface-2 px-2.5 py-1 text-sm font-semibold" style={{ color: s.color }}>
-        <span aria-hidden>{s.icon}</span>
-        {s.label}
-      </div>
-      <div className="mt-3 h-1.5 w-full overflow-hidden rounded-full bg-surface-2">
-        <div className="h-full rounded-full transition-[width] duration-300" style={{ width: `${Math.round(bar * 100)}%`, background: s.color }} />
-      </div>
-      <div className="mt-2 flex justify-between text-xs tabular-nums text-ink-3">
-        {n.mode === "reflex" ? (
-          <>
-            <span>on reflex {fmtPct(n.reflexShare)}</span>
-            <span>audits {n.audits >= 3 ? fmtPct(n.agreement) : "–"}</span>
-          </>
-        ) : (
-          <>
-            <span>agrees with LLM {fmtPct(n.agreement)}</span>
-            <span>conf {n.confidence == null ? "–" : n.confidence.toFixed(2)}</span>
-          </>
-        )}
-      </div>
-    </button>
-  );
-}
-
-const tooltipStyle = { background: "var(--surface-2)", border: "1px solid var(--border)", borderRadius: 8, color: "var(--text-primary)" };
-const EVENT_COLOR: Record<Ev["type"], string> = {
-  promote: "var(--status-good)",
-  demote: "var(--status-critical)",
-  rewrite: "var(--thinking)",
-  novel: "var(--status-warning)",
-};
-
-function Chart({ title, data, lines, fmt, events, campaignSeq, domain, xMax }: {
-  title: string;
-  data: Point[];
-  lines: { key: keyof Point; name: string; color: string }[];
-  fmt: (v: number) => string;
-  events: Ev[];
-  campaignSeq: number | null;
-  domain?: [number, number];
-  xMax: number;
-}) {
-  return (
-    <div className="rounded-xl border border-line bg-surface-1 p-4">
-      <div className="mb-2 text-sm font-medium text-ink-2">{title}</div>
-      <div className="h-56">
-        <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={data} margin={{ top: 16, right: 12, bottom: 0, left: 0 }}>
-            <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" vertical={false} />
-            <XAxis dataKey="seq" type="number" domain={[0, xMax]} tick={{ fill: "var(--text-muted)", fontSize: 12 }} stroke="var(--border)" />
-            <YAxis tickFormatter={fmt} domain={domain} tick={{ fill: "var(--text-muted)", fontSize: 12 }} stroke="var(--border)" width={58} />
-            <Tooltip contentStyle={tooltipStyle} formatter={(v) => fmt(Number(v))} labelFormatter={(l) => `Alert #${l}`} />
-            {lines.length > 1 && <Legend wrapperStyle={{ color: "var(--text-secondary)", fontSize: 12 }} />}
-            {campaignSeq != null && (
-              <ReferenceLine
-                x={campaignSeq}
-                stroke="var(--text-muted)"
-                strokeDasharray="4 4"
-                label={{ value: "New campaign: attacks on AI agents", fill: "var(--text-secondary)", fontSize: 11, position: "insideTopLeft" }}
-              />
-            )}
-            {events
-              .filter((e) => e.type !== "novel")
-              .map((e) => (
-                <ReferenceLine key={e._id} x={e.seq} stroke={EVENT_COLOR[e.type]} strokeOpacity={0.45} strokeDasharray={e.type === "rewrite" ? "2 3" : undefined} />
-              ))}
-            {lines.map((l) => (
-              <Line key={String(l.key)} type="monotone" dataKey={l.key} name={l.name} stroke={l.color} strokeWidth={2} dot={false} isAnimationActive={false} />
-            ))}
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
-    </div>
-  );
-}
-
-const EVENT_STYLE: Record<Ev["type"], { icon: string; label: string }> = {
-  promote: { icon: "⚡", label: "Promoted to reflex" },
-  demote: { icon: "↓", label: "Demoted" },
-  rewrite: { icon: "✎", label: "Rewrote its own question" },
-  novel: { icon: "◎", label: "Never seen before" },
-};
-
-function storyLine(e: Ev | undefined): { text: string; color: string; icon: string } {
-  if (!e) return { icon: "●", color: "var(--thinking)", text: "Every decision starts on System 2, the LLM. Jev, a System One model, shadows each one and learns." };
-  const who = e.node ? NODE_LABEL[e.node] : "";
-  if (e.type === "promote") return { icon: "⚡", color: EVENT_COLOR.promote, text: `"${who}" became a reflex at alert #${e.seq}: ${e.detail}` };
-  if (e.type === "demote") return { icon: "↓", color: EVENT_COLOR.demote, text: `"${who}" was demoted back to the LLM at alert #${e.seq}: ${e.detail}` };
-  if (e.type === "rewrite") return { icon: "✎", color: EVENT_COLOR.rewrite, text: `The harness rewrote "${who}" at alert #${e.seq}: ${e.detail}` };
-  return { icon: "◎", color: EVENT_COLOR.novel, text: `Vector Search flagged alert #${e.seq} as unlike anything in memory, so reflexes handed it to the LLM.` };
-}
-
-function Clamp({ text, lines = 3, className = "" }: { text: string; lines?: number; className?: string }) {
-  const [open, setOpen] = useState(false);
-  return (
-    <div
-      onClick={() => setOpen(!open)}
-      title={open ? "Click to collapse" : "Click to expand"}
-      className={`cursor-pointer ${className}`}
-      style={open ? undefined : { display: "-webkit-box", WebkitLineClamp: lines, WebkitBoxOrient: "vertical", overflow: "hidden" }}
-    >
-      {text}
-    </div>
-  );
-}
-
-function criteriaKeys(q?: Question) {
-  if (!q?.criteria) return [];
-  return Array.isArray(q.criteria) ? q.criteria : Object.keys(q.criteria);
-}
-
-function RewriteDiff({ e }: { e: Ev }) {
-  const bq = e.before?.question ?? (e.before as Question | undefined);
-  const aq = e.after?.question;
-  if (!bq || !aq) return null;
-  const bk = criteriaKeys(bq);
-  const ak = criteriaKeys(aq);
-  const added = ak.filter((k) => !bk.includes(k));
-  const removed = bk.filter((k) => !ak.includes(k));
-  const bc = e.before?.context;
-  const ac = e.after?.context;
-  return (
-    <div className="space-y-2 text-sm">
-      <div className="text-ink-3">Latest rewrite · v{e.version} · alert #{e.seq}</div>
-      <div className="rounded-lg bg-surface-2 p-3">
-        <Clamp text={bq.instructions} lines={2} className="text-ink-3 line-through decoration-ink-3/60" />
-        <Clamp text={aq.instructions} lines={4} className="mt-2 text-ink" />
-      </div>
-      {(added.length > 0 || removed.length > 0) && (
-        <div className="flex flex-wrap gap-2">
-          {added.map((k) => (
-            <span key={k} className="rounded-full bg-surface-2 px-2 py-0.5 text-good">+ {k}</span>
-          ))}
-          {removed.map((k) => (
-            <span key={k} className="rounded-full bg-surface-2 px-2 py-0.5 text-bad">− {k}</span>
-          ))}
-        </div>
-      )}
-      {bc && ac && bc.join(",") !== ac.join(",") && (
-        <div className="text-ink-2">
-          Context policy: <span className="text-ink-3 line-through">{bc.join(" + ")}</span> → <span className="text-ink">{ac.join(" + ")}</span>
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ---------- page ----------
-export default function Dashboard() {
+export default function Story() {
   const [data, setData] = useState<Payload | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [cursor, setCursor] = useState<number | null>(null); // null = live
-  const [playing, setPlaying] = useState(false);
-  const [speed, setSpeed] = useState(1); // alerts per tick (10 ticks/s)
-  const [msg, setMsg] = useState<string | null>(null);
-  const autoReplayed = useRef(false);
-  const holdUntil = useRef(0);
-  const inFlight = useRef(false);
+  const [idx, setIdx] = useState(0);
+  const [cursor, setCursor] = useState(CHAPTERS[0].at);
+  const [animating, setAnimating] = useState(false);
+  const raf = useRef<number | null>(null);
 
-  // Poll while a run is live; slow down once it's done.
-  useEffect(() => {
-    let alive = true;
-    let timer: ReturnType<typeof setTimeout>;
-    // URL params, applied once when the first run arrives: ?replay=1 autoplays, ?at=N freezes on
-    // alert N, ?node=<name> opens a node, ?speed=N. On the read-only deployment, a finished run
-    // replays itself once on load.
-    const applyStartParams = (p: Payload) => {
-      if (autoReplayed.current || !p.series?.length) return;
-      const q = new URLSearchParams(window.location.search);
-      const last = p.series[p.series.length - 1].seq;
-      const node = q.get("node");
-      if (node && NODE_ORDER.includes(node)) setSelected(node);
-      if (q.get("speed")) setSpeed(Math.max(1, Number(q.get("speed")) || 1));
-      if (q.get("at")) {
-        autoReplayed.current = true;
-        setCursor(Math.min(Number(q.get("at")) || 0, last));
-      } else if (q.get("replay") === "1" || (p.run?.status === "done" && !p.canRun)) {
-        autoReplayed.current = true;
-        setCursor(0);
-        setPlaying(true);
-      }
-    };
-    const tick = async () => {
-      if (!inFlight.current) {
-        inFlight.current = true;
-        try {
-          const db = new URLSearchParams(window.location.search).get("db");
-          const r = await fetch(db ? `/api/state?db=${encodeURIComponent(db)}` : "/api/state", { cache: "no-store" });
-          if (alive && r.ok) {
-            const p: Payload = await r.json();
-            setData(p);
-            applyStartParams(p);
-          }
-        } catch {}
-        inFlight.current = false;
-      }
-      if (alive) timer = setTimeout(tick, data?.run?.status === "running" ? 1000 : 6000);
-    };
-    tick();
-    return () => {
-      alive = false;
-      clearTimeout(timer);
-    };
-  }, [data?.run?.status]);
-
-  const series = useMemo(() => data?.series ?? [], [data]);
-  const lastSeq = series.length ? series[series.length - 1].seq : 0;
-
-  // Replay: advance the cursor, pausing briefly on each key moment so its story line can be read.
-  const keySeqs = useMemo(() => {
-    const evs = data?.events ?? [];
-    const firstNovel = evs.find((e) => e.type === "novel");
-    return evs.filter((e) => e.type !== "novel" || e === firstNovel).map((e) => e.seq);
-  }, [data?.events]);
-  useEffect(() => {
-    if (!playing) return;
-    const id = setInterval(() => {
-      if (Date.now() < holdUntil.current) return;
-      setCursor((c) => {
-        const from = c ?? 0;
-        const next = from + speed;
-        if (next >= lastSeq) {
-          setPlaying(false);
-          return null;
-        }
-        const hit = keySeqs.find((s) => s > from && s <= next);
-        if (hit !== undefined) {
-          holdUntil.current = Date.now() + 1500;
-          return hit;
-        }
-        return next;
-      });
-    }, 100);
-    return () => clearInterval(id);
-  }, [playing, speed, lastSeq, keySeqs]);
-
-  const at = cursor ?? lastSeq;
-  const view = useMemo(() => {
-    const seriesAt = series.filter((p) => p.seq <= at);
-    const eventsAt = (data?.events ?? []).filter((e) => e.seq <= at);
-    const versions = data?.versions ?? [];
-    const vAt = eventsAt.reduce((m, e) => Math.max(m, e.version ?? 0), 0);
-    const harness = [...versions].reverse().find((v) => v.version <= vAt) ?? versions[0];
-    const decisions = (data?.decisions ?? []).filter((d) => d.seq <= at);
-
-    const nodes: Record<string, NodeView> = {};
-    for (const n of NODE_ORDER) {
-      const cfg = harness?.nodes[n];
-      const mode = cfg?.mode ?? "shadow";
-      const nodeEvents = eventsAt.filter((e) => e.node === n);
-      const lastRewrite = [...nodeEvents].reverse().find((e) => e.type === "rewrite");
-      const lastDemote = [...nodeEvents].reverse().find((e) => e.type === "demote");
-      const lastPromote = [...nodeEvents].reverse().find((e) => e.type === "promote");
-      const since = lastRewrite?.version ?? 0;
-      const ds = decisions.filter((d) => d.node === n && (d.v ?? 0) >= since);
-      const recent = ds.slice(-WINDOW);
-      const confs = recent.map((d) => d.conf).filter((c): c is number => typeof c === "number");
-      const shadowAgree = ds.filter((d) => d.mode === "shadow" && typeof d.agree === "boolean").slice(-WINDOW).map((d) => !!d.agree);
-      const audits = ds.filter((d) => d.audited && typeof d.agree === "boolean").slice(-10).map((d) => !!d.agree);
-      nodes[n] = {
-        mode,
-        demoted: !!lastDemote && (!lastPromote || lastDemote.seq > lastPromote.seq) && mode === "shadow",
-        agreement: mode === "reflex" ? rate(audits) : rate(shadowAgree),
-        samples: shadowAgree.length,
-        audits: audits.length,
-        reflexShare: recent.length ? recent.filter((d) => d.used === "reflex").length / recent.length : 0,
-        confidence: confs.length ? confs.reduce((a, b) => a + b, 0) / confs.length : null,
-        floor: cfg?.thresholds?.confidence_floor ?? 0.6,
-      };
+  const goTo = useCallback((i: number) => {
+    const ch = CHAPTERS[Math.max(0, Math.min(CHAPTERS.length - 1, i))];
+    const target = CHAPTERS.indexOf(ch);
+    setIdx(target);
+    if (raf.current) cancelAnimationFrame(raf.current);
+    if (ch.from == null) {
+      setAnimating(false);
+      setCursor(ch.at);
+      return;
     }
+    const from = ch.from;
+    const t0 = performance.now();
+    setAnimating(true);
+    setCursor(from);
+    const step = (now: number) => {
+      const t = Math.min(1, (now - t0) / ANIM_MS);
+      setCursor(Math.round(from + (ch.at - from) * ease(t)));
+      if (t < 1) raf.current = requestAnimationFrame(step);
+      else setAnimating(false);
+    };
+    raf.current = requestAnimationFrame(step);
+  }, []);
 
-    // An alert skips the LLM entirely only when all six decisions were served by reflexes.
+  // Load the recorded run once; ?ch=N opens chapter N (1-based).
+  useEffect(() => {
+    fetch(`/api/state?db=${STORY_DB}`)
+      .then((r) => r.json())
+      .then((p: Payload) => {
+        setData(p);
+        const ch = Number(new URLSearchParams(window.location.search).get("ch"));
+        if (ch >= 1 && ch <= CHAPTERS.length) goTo(ch - 1);
+      })
+      .catch(() => setData({}));
+  }, [goTo]);
+
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "ArrowRight" || e.key === " ") {
+        e.preventDefault();
+        goTo(idx + 1);
+      } else if (e.key === "ArrowLeft") goTo(idx - 1);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [idx, goTo]);
+
+  // Index the run once.
+  const index = useMemo(() => {
+    const bySeq = new Map<number, Dec[]>();
     const reflexCount = new Map<number, number>();
-    for (const d of decisions) if (d.used === "reflex") reflexCount.set(d.seq, (reflexCount.get(d.seq) ?? 0) + 1);
-    const full = seriesAt.map((p) => (reflexCount.get(p.seq) ?? 0) === NODE_ORDER.length);
-    for (let i = 0; i < seriesAt.length; i++) {
-      const w = full.slice(Math.max(0, i - WINDOW + 1), i + 1);
-      seriesAt[i] = { ...seriesAt[i], noLlm: w.filter(Boolean).length / w.length };
+    for (const d of data?.decisions ?? []) {
+      bySeq.set(d.seq, [...(bySeq.get(d.seq) ?? []), d]);
+      if (d.used === "reflex") reflexCount.set(d.seq, (reflexCount.get(d.seq) ?? 0) + 1);
     }
-    const fastMs = seriesAt.filter((p, i) => full[i] && typeof p.ms_raw === "number").map((p) => p.ms_raw as number).sort((a, b) => a - b);
-    const reflexPathMs = fastMs.length >= 5 ? fastMs[Math.floor(fastMs.length / 2)] : null;
+    const series = new Map((data?.series ?? []).map((p) => [p.seq, p]));
+    const alerts = new Map((data?.alerts ?? []).map((a) => [a.seq, a]));
+    return { bySeq, reflexCount, series, alerts };
+  }, [data]);
 
-    const before = seriesAt.length >= WINDOW ? seriesAt[WINDOW - 1] : seriesAt[0];
-    const now = seriesAt[seriesAt.length - 1];
-    const recentAlerts = (data?.alerts ?? []).filter((a) => a.seq <= at).slice(-7).reverse();
-    const decBySeq = new Map<number, Dec[]>();
-    for (const d of decisions.filter((d) => recentAlerts.some((a) => a.seq === d.seq))) decBySeq.set(d.seq, [...(decBySeq.get(d.seq) ?? []), d]);
-    const campaignSeq = seriesAt.find((p) => p.batch === "campaign")?.seq ?? null;
-    return { seriesAt, eventsAt, harness, nodes, before, now, recentAlerts, decBySeq, campaignSeq, versionCount: vAt + 1, reflexPathMs };
-  }, [series, data, at]);
+  const ch = CHAPTERS[idx];
+  const view = useMemo(() => {
+    const at = cursor;
+    const events = (data?.events ?? []).filter((e) => e.seq <= at);
+    const vAt = events.reduce((m, e) => Math.max(m, e.version ?? 0), 0);
+    const versions = data?.versions ?? [];
+    const harness = [...versions].reverse().find((v) => v.version <= vAt) ?? versions[0];
+    const exampleSeq = ch.alertSeq ?? at;
+    const example = index.bySeq.get(exampleSeq) ?? [];
 
-  async function start() {
-    if (!confirm("Start a new alert storm? This resets the current run.")) return;
-    const r = await fetch("/api/run", { method: "POST", body: JSON.stringify({}) });
-    const body = await r.json();
-    setMsg(body.error ?? "Alert storm started");
-    setCursor(null);
-  }
+    const cards = NODES.map((n: NodeName) => {
+      const mode = harness?.nodes[n]?.mode ?? "shadow";
+      const mine = events.filter((e) => e.node === n);
+      const lastPromote = [...mine].reverse().find((e) => e.type === "promote");
+      const lastChange = [...mine].reverse().find((e) => e.type === "demote" || e.type === "rewrite");
+      const lastRewrite = [...mine].reverse().find((e) => e.type === "rewrite");
+      const used = example.find((d) => d.node === n)?.used;
+      let state: CardState = mode === "reflex" ? "reflex" : "llm";
+      if (mode === "shadow" && lastChange && (!lastPromote || lastChange.seq > lastPromote.seq)) state = "rewriting";
+      if (mode === "reflex" && used === "fallback") state = "handedBack";
+      const added = lastRewrite ? keys(lastRewrite.after?.question).filter((k) => !keys(lastRewrite.before?.question).includes(k)) : [];
+      return { n, state, added };
+    });
 
-  const run = data?.run;
-  const total = run?.total ?? lastSeq;
-  const story = storyLine([...view.eventsAt].reverse().find((e) => e.type !== "novel") ?? view.eventsAt[view.eventsAt.length - 1]);
-  const sel = selected ? view.nodes[selected] : null;
-  const selCfg = selected ? view.harness?.nodes[selected] : null;
-  const selEvents = view.eventsAt.filter((e) => e.node === selected);
-  const selRewrite = [...selEvents].reverse().find((e) => e.type === "rewrite");
-  const b = view.before;
-  const k = view.now;
+    let full = 0;
+    let seen = 0;
+    for (let s = Math.max(0, at - WINDOW + 1); s <= at; s++) {
+      if (!index.bySeq.has(s)) continue;
+      seen++;
+      if (index.reflexCount.get(s) === NODES.length) full++;
+    }
+    return {
+      cards,
+      exampleSeq,
+      example,
+      alert: index.alerts.get(exampleSeq),
+      cost: index.series.get(at)?.cost,
+      costWas: index.series.get(WINDOW - 1)?.cost,
+      noLlm: seen ? full / seen : 0,
+    };
+  }, [cursor, data, index, ch]);
+
+  const loading = !data;
+  const isResult = ch.id === "result";
 
   return (
-    <main className="mx-auto w-full max-w-[1440px] space-y-4 p-6">
-      <header className="flex flex-wrap items-end justify-between gap-4">
-        <div>
-          <h1 className="text-4xl font-bold tracking-tight">Reflexes</h1>
-          <p className="mt-1 text-lg text-ink-2">A security agent that grows reflexes. The LLM thinks, Jev learns, MongoDB remembers.</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          {run && (
-            <div className="rounded-full border border-line bg-surface-1 px-4 py-2 text-sm tabular-nums text-ink-2">
-              {cursor != null ? "▶ Replay" : run.status === "running" ? "● Live" : "Recorded run"} · alert {at}/{total} · harness v{view.harness?.version ?? 0}
-            </div>
-          )}
-          {run?.status === "done" && (
-            <>
-              <button
-                onClick={() => {
-                  if (playing) setPlaying(false);
-                  else {
-                    setCursor((c) => (c == null || c >= lastSeq ? 0 : c));
-                    setPlaying(true);
-                  }
-                }}
-                className="rounded-full border border-line bg-surface-1 px-4 py-2 text-sm font-medium hover:border-ink-3"
-              >
-                {playing ? "❚❚ Pause" : "▶ Replay"}
-              </button>
-              <select
-                value={speed}
-                onChange={(e) => setSpeed(Number(e.target.value))}
-                className="rounded-full border border-line bg-surface-1 px-3 py-2 text-sm"
-                aria-label="Replay speed"
-              >
-                <option value={1}>10 alerts/s</option>
-                <option value={3}>30 alerts/s</option>
-                <option value={8}>80 alerts/s</option>
-              </select>
-              {cursor != null && (
-                <button onClick={() => { setPlaying(false); setCursor(null); }} className="rounded-full border border-line bg-surface-1 px-4 py-2 text-sm hover:border-ink-3">
-                  Jump to end
-                </button>
-              )}
-            </>
-          )}
-          {data?.canRun && (
-            <button onClick={start} className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-page hover:opacity-90">
-              Start alert storm
-            </button>
-          )}
-        </div>
+    <main className="mx-auto flex min-h-screen w-full max-w-[1440px] flex-col gap-5 p-6">
+      <header className="flex flex-wrap items-center justify-between gap-4">
+        <h1 className="text-3xl font-bold tracking-tight">
+          Reflexes <span className="font-normal text-ink-2">· agents that grow reflexes</span>
+        </h1>
+        <Link href={`/details?db=${STORY_DB}&at=${cursor}`} className="rounded-full border border-line bg-surface-1 px-4 py-2 text-sm text-ink-2 hover:border-ink-3">
+          Details →
+        </Link>
       </header>
-      {msg && <div className="text-sm text-ink-3">{msg}</div>}
-      {run?.status === "done" && (
-        <input
-          type="range"
-          min={0}
-          max={lastSeq}
-          value={at}
-          onChange={(e) => { setPlaying(false); setCursor(Number(e.target.value)); }}
-          className="w-full accent-[var(--series-1)]"
-          aria-label="Scrub through the run"
-        />
-      )}
 
-      {!run && <div className="rounded-xl border border-line bg-surface-1 p-8 text-ink-2">No run yet. Start an alert storm to watch the agent grow reflexes.</div>}
+      <div className="rounded-xl border border-line bg-surface-1 px-5 py-3 text-lg text-ink-2">{PAIN}</div>
 
-      {run && (
-        <>
-          <div className="flex items-center gap-3 rounded-xl border border-line bg-surface-1 px-5 py-3 text-lg">
-            <span aria-hidden style={{ color: story.color }}>{story.icon}</span>
-            <span className="text-ink" style={{ display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{story.text}</span>
+      <nav className="flex flex-wrap items-center gap-2" aria-label="Chapters">
+        {CHAPTERS.map((c, i) => (
+          <button
+            key={c.id}
+            onClick={() => goTo(i)}
+            className={`rounded-full border px-3 py-1.5 text-sm transition-colors ${i === idx ? "border-ink bg-ink font-semibold text-page" : i < idx ? "border-line bg-surface-2 text-ink-2" : "border-line bg-surface-1 text-ink-3 hover:border-ink-3"}`}
+          >
+            {c.title}
+          </button>
+        ))}
+        <span className="ml-auto text-sm tabular-nums text-ink-3">alert #{cursor}</span>
+        <button onClick={() => goTo(idx - 1)} disabled={idx === 0} className="rounded-full border border-line px-4 py-2 text-sm text-ink-2 disabled:opacity-40">
+          ←
+        </button>
+        <button
+          onClick={() => goTo(idx + 1)}
+          disabled={idx === CHAPTERS.length - 1}
+          className="rounded-full bg-ink px-6 py-2 text-base font-semibold text-page hover:opacity-90 disabled:opacity-40"
+        >
+          Next →
+        </button>
+      </nav>
+
+      <section>
+        <p className="text-3xl font-semibold leading-snug tracking-tight">{ch.caption}</p>
+        <p className="mt-2 text-sm text-ink-3">{ch.proof}</p>
+      </section>
+
+      {loading ? (
+        <div className="rounded-xl border border-line bg-surface-1 p-10 text-ink-3">Loading the recorded run…</div>
+      ) : (
+        <section className="grid items-stretch gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.7fr)_auto_minmax(0,0.8fr)]">
+          {/* Security alert */}
+          <div className="flex flex-col rounded-xl border border-line bg-surface-1 p-4">
+            <div className="mb-2 text-sm text-ink-3">Security alert #{view.exampleSeq}</div>
+            <pre className="max-h-52 flex-1 overflow-hidden whitespace-pre-wrap rounded-lg bg-surface-2 p-3 font-mono text-[13px] leading-relaxed text-ink">{view.alert?.text ?? "…"}</pre>
+            <ul className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
+              {NODES.map((n) => {
+                const used = view.example.find((d) => d.node === n)?.used;
+                const s = used ? SOURCE[used] : "llm";
+                return (
+                  <li key={n} className="flex items-center gap-1.5">
+                    <span aria-hidden style={{ color: STATE_COLOR[s] }}>{LEGEND[s].icon}</span>
+                    <span className="text-ink-2">{NODE_LABEL[n]}</span>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
 
-          <section className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-            <Tile
-              label="Decision time per alert"
-              now={k?.ms}
-              before={b?.ms}
-              fmt={fmtMs}
-              better={ratio(b?.ms, k?.ms)}
-              note={view.reflexPathMs != null ? `all-reflex alerts: ${fmtMs(view.reflexPathMs)} (median)` : null}
-            />
-            <Tile label="Cost per 1,000 alerts" now={k?.cost} before={b?.cost} fmt={fmtCost} better={ratio(b?.cost, k?.cost)} note="incl. background audits" />
-            <Tile label="Accuracy vs ground truth" now={k?.accuracy} before={b?.accuracy} fmt={fmtPct} note="labels never shown to the engine" />
-            <Tile label="Decisions on reflex" now={k?.reflex} before={b?.reflex} fmt={fmtPct} />
-            <Tile label="Alerts with no LLM call" now={k?.noLlm} before={b?.noLlm} fmt={fmtPct} note="all 6 decisions made by Jev" />
-          </section>
+          <div className="hidden items-center text-3xl text-ink-3 lg:flex" aria-hidden>→</div>
 
-          <section className="rounded-xl border border-line bg-surface-1/40 p-4">
-            <div className="mb-3 flex items-center gap-3 text-sm text-ink-3">
-              <span>Security alert</span>
-              <span aria-hidden>→</span>
-              <span>6 decisions per alert · click one to see its reflex</span>
-            </div>
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-              {NODE_ORDER.map((n) => (
-                <NodeCard key={n} name={n} n={view.nodes[n]} selected={selected === n} onClick={() => setSelected(selected === n ? null : n)} />
-              ))}
-            </div>
-            {sel && selCfg && selected && (
-              <div className="mt-4 grid gap-6 rounded-xl border border-line bg-surface-1 p-4 md:grid-cols-3">
-                <div>
-                  <div className="text-sm text-ink-3">Reflex question sent to Jev ({selCfg.question.type})</div>
-                  <Clamp text={selCfg.question.instructions} lines={4} className="mt-1 text-ink" />
-                  {selCfg.question.criteria && (
-                    <div className="mt-2 flex flex-wrap gap-1.5 text-xs">
-                      {criteriaKeys(selCfg.question).map((c) => (
-                        <span key={c} className="rounded-full bg-surface-2 px-2 py-0.5 text-ink-2">{c}</span>
+          {/* The six decisions */}
+          <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+            {view.cards.map(({ n, state, added }) => {
+              const focus = ch.focus === n;
+              return (
+                <div
+                  key={n}
+                  className="flex flex-col justify-between rounded-xl border bg-surface-1 p-4 transition-colors"
+                  style={{
+                    borderColor: focus ? "var(--text-primary)" : "var(--border)",
+                    boxShadow: focus ? "0 0 0 2px var(--text-primary)" : state === "reflex" ? `inset 0 0 0 1px ${STATE_COLOR.reflex}` : undefined,
+                  }}
+                >
+                  <div className="text-lg font-medium">{NODE_LABEL[n]}</div>
+                  <div className="mt-3 flex items-center gap-2" style={{ color: STATE_COLOR[state] }}>
+                    <span className="text-3xl leading-none" aria-hidden>{LEGEND[state].icon}</span>
+                    <span className="text-lg font-semibold">{LEGEND[state].label}</span>
+                  </div>
+                  <div className="mt-1 text-xs text-ink-3">{LEGEND[state].sub}</div>
+                  {added.length > 0 && (
+                    <div className="mt-2 flex flex-wrap gap-1">
+                      {added.map((k) => (
+                        <span key={k} className="rounded-full bg-surface-2 px-2 py-0.5 text-xs font-medium text-good">+ {k}</span>
                       ))}
                     </div>
                   )}
-                  <div className="mt-3 text-sm text-ink-3">
-                    Sees: <span className="text-ink-2">{selCfg.context.join(" + ")}</span> · confidence floor{" "}
-                    <span className="text-ink-2">{sel.floor.toFixed(2)}</span>
-                  </div>
                 </div>
-                <div>{selRewrite ? <RewriteDiff e={selRewrite} /> : <div className="text-sm text-ink-3">Not rewritten yet.</div>}</div>
-                <div>
-                  <div className="text-sm text-ink-3">History</div>
-                  <ul className="mt-1 space-y-2 text-sm">
-                    {selEvents.length === 0 && <li className="text-ink-3">No changes yet</li>}
-                    {selEvents.map((e) => (
-                      <li key={e._id}>
-                        <span style={{ color: EVENT_COLOR[e.type] }}>{EVENT_STYLE[e.type].icon} {EVENT_STYLE[e.type].label}</span>{" "}
-                        <span className="text-ink-2">v{e.version} · #{e.seq}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              </div>
-            )}
-          </section>
+              );
+            })}
+          </div>
 
-          <section className="grid gap-4 lg:grid-cols-2">
-            <Chart
-              title="Share of decisions on reflex, and accuracy (rolling 20 alerts)"
-              data={view.seriesAt}
-              lines={[
-                { key: "reflex", name: "On reflex (Jev)", color: "var(--series-2)" },
-                { key: "accuracy", name: "Accuracy vs ground truth", color: "var(--series-1)" },
-              ]}
-              fmt={(v) => fmtPct(v)}
-              events={view.eventsAt}
-              campaignSeq={view.campaignSeq}
-              domain={[0, 1]}
-              xMax={total}
-            />
-            <Chart
-              title="Decision time per alert"
-              data={view.seriesAt}
-              lines={[{ key: "ms", name: "Decision time", color: "var(--series-1)" }]}
-              fmt={(v) => fmtMs(v)}
-              events={view.eventsAt}
-              campaignSeq={view.campaignSeq}
-              xMax={total}
-            />
-            <Chart
-              title="Alerts decided with no LLM call (rolling 20)"
-              data={view.seriesAt}
-              lines={[{ key: "noLlm", name: "No LLM call", color: "var(--series-1)" }]}
-              fmt={(v) => fmtPct(v)}
-              events={view.eventsAt}
-              campaignSeq={view.campaignSeq}
-              domain={[0, 1]}
-              xMax={total}
-            />
-            <Chart
-              title="Cost per 1,000 alerts"
-              data={view.seriesAt}
-              lines={[{ key: "cost", name: "Cost", color: "var(--series-1)" }]}
-              fmt={(v) => fmtCost(v)}
-              events={view.eventsAt}
-              campaignSeq={view.campaignSeq}
-              xMax={total}
-            />
-          </section>
+          <div className="hidden items-center text-3xl text-ink-3 lg:flex" aria-hidden>→</div>
 
-          <section className="grid gap-4 lg:grid-cols-2">
-            <div className="rounded-xl border border-line bg-surface-1 p-4">
-              <div className="mb-3 text-sm font-medium text-ink-2">Live alerts · what the agent did</div>
-              <ul className="space-y-2.5">
-                {view.recentAlerts.map((a) => (
-                  <li key={a.seq} className="text-sm">
-                    <div className="flex items-center gap-3">
-                      <span className="w-12 shrink-0 tabular-nums text-ink-3">#{a.seq}</span>
-                      <span className="min-w-0 flex-1 truncate text-ink-2">{a.text}</span>
-                      <span className="flex shrink-0 gap-1" aria-label="who decided">
-                        {NODE_ORDER.map((n) => {
-                          const d = view.decBySeq.get(a.seq)?.find((x) => x.node === n);
-                          const c = d?.used === "reflex" ? "var(--status-good)" : d?.used === "fallback" ? "var(--status-warning)" : "var(--thinking)";
-                          return <span key={n} title={`${NODE_LABEL[n]}: ${d?.used ?? "?"}${d?.reason ? ` (${d.reason})` : ""}`} className="h-2.5 w-2.5 rounded-full" style={{ background: c }} />;
-                        })}
-                      </span>
-                    </div>
-                    <div className="mt-0.5 flex gap-3 pl-15 text-xs">
-                      <span className="text-ink-2">→ {a.action}</span>
-                      {a.novel && <span className="text-warn">◎ never seen before: sent to the LLM</span>}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-              <div className="mt-3 flex flex-wrap gap-4 text-xs text-ink-3">
-                <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-think" />LLM (System 2)</span>
-                <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-good" />Reflex (Jev)</span>
-                <span><span className="mr-1 inline-block h-2 w-2 rounded-full bg-warn" />Reflex handed back: low confidence, never seen, or unproven on similar alerts</span>
-              </div>
-            </div>
-            <div className="rounded-xl border border-line bg-surface-1 p-4">
-              <div className="mb-3 text-sm font-medium text-ink-2">Harness evolution · {view.versionCount} {view.versionCount === 1 ? "version" : "versions"} stored in MongoDB</div>
-              <ul className="max-h-80 space-y-2.5 overflow-auto text-sm">
-                {view.eventsAt.length === 0 && <li className="text-ink-3">Waiting for the first graduation…</li>}
-                {[...view.eventsAt].reverse().map((e) => (
-                  <li key={e._id} className="flex gap-2">
-                    <span className="shrink-0 font-medium" style={{ color: EVENT_COLOR[e.type] }}>
-                      {EVENT_STYLE[e.type].icon} {EVENT_STYLE[e.type].label}
-                    </span>
-                    <span className="text-ink-2">
-                      {e.node && <span className="text-ink">{NODE_LABEL[e.node]} · </span>}v{e.version} · #{e.seq} · {e.detail}
-                    </span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-          </section>
-        </>
+          {/* Action taken */}
+          <div className="flex flex-col justify-center rounded-xl border border-line bg-surface-1 p-4">
+            <div className="text-sm text-ink-3">Action taken</div>
+            <div className="mt-2 text-xl font-semibold leading-snug">{view.alert?.action ?? "…"}</div>
+          </div>
+        </section>
       )}
+
+      {!loading && !isResult && (
+        <section className="grid gap-4 sm:grid-cols-2">
+          <div className="rounded-xl border border-line bg-surface-1 p-4">
+            <div className="text-sm text-ink-3">{ch.metric?.label ?? "Cost per 1,000 alerts"}</div>
+            <div className="mt-1 text-4xl font-semibold tabular-nums">
+              {ch.metric ? ch.metric.after : view.cost != null ? `$${(view.cost * 1000).toFixed(2)}` : "–"}
+            </div>
+            <div className="mt-1 text-sm text-ink-3">
+              was {ch.metric ? ch.metric.before : view.costWas != null ? `$${(view.costWas * 1000).toFixed(2)}` : "–"} with every decision on the LLM
+            </div>
+          </div>
+          <div className="rounded-xl border border-line bg-surface-1 p-4">
+            <div className="text-sm text-ink-3">Alerts with no LLM call (last 20)</div>
+            <div className="mt-1 text-4xl font-semibold tabular-nums">{Math.round(view.noLlm * 100)}%</div>
+            <div className="mt-1 text-sm text-ink-3">all six decisions made by reflexes</div>
+          </div>
+        </section>
+      )}
+
+      {isResult && (
+        <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+          {RESULTS.map((r) => (
+            <div key={r.label} className="rounded-xl border border-line bg-surface-1 p-4">
+              <div className="text-sm text-ink-3">{r.label}</div>
+              <div className="mt-1 text-2xl font-semibold tabular-nums">{r.value}</div>
+              <div className="mt-1 text-xs text-ink-3">{r.note}</div>
+            </div>
+          ))}
+        </section>
+      )}
+
+      <footer className="mt-auto flex flex-wrap items-center gap-x-5 gap-y-2 border-t border-line pt-4 text-sm text-ink-3">
+        {(Object.keys(LEGEND) as CardState[]).map((k) => (
+          <span key={k}>
+            <span aria-hidden style={{ color: STATE_COLOR[k] }}>{LEGEND[k].icon}</span> {LEGEND[k].label}
+          </span>
+        ))}
+        <span className="ml-auto">LLM = System 2 (slow thinking) · Jev = System 1 (reflex) · MongoDB = memory</span>
+        {animating && <span className="sr-only">Replaying…</span>}
+      </footer>
     </main>
   );
 }
