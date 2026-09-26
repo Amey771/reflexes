@@ -82,6 +82,6 @@ export const CHAPTERS: Chapter[] = [
     at: 359,
     caption: "Cheaper and faster the longer it runs, with a small, visible accuracy trade and a full audit trail in MongoDB.",
     metric: { label: "Cost per 1,000 alerts", before: "$1.03", after: "$0.40" },
-    proof: "Run 3 (#100–245): 38% of alerts with no LLM call at 257 ms median; 2.5× cheaper; accuracy 95.8% → 91.8%. With a frontier teacher (run 2): reflex path 10× faster (238 ms vs 2.4 s).",
+    proof: "Run 3 (#100–245 vs first 20 alerts): 2.6× cheaper ($1.03 → $0.40 per 1,000); 38% of alerts with no LLM call at 257 ms median (vs 890 ms all-LLM); accuracy 95.8% → 91.8%. With a frontier teacher (run 2): reflex path 10× faster (238 ms vs 2.4 s).",
   },
 ];
