@@ -1,0 +1,25 @@
+# secrets
+.env
+.env*.local
+.claude/settings.local.json
+
+# node / next
+node_modules/
+.next/
+out/
+build/
+dist/
+*.tsbuildinfo
+next-env.d.ts
+.vercel/
+
+# python (if used)
+__pycache__/
+.venv/
+
+# os / editor
+.DS_Store
+*.log
+
+# private strategy notes (kept local, not for judges)
+HACKATHON_PLAYBOOK.md

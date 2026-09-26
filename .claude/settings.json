@@ -1,0 +1,44 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "enabledMcpjsonServers": ["mongodb"],
+  "permissions": {
+    "allow": [
+      "Bash(npm run *)",
+      "Bash(npm install *)",
+      "Bash(npm i *)",
+      "Bash(npm ls *)",
+      "Bash(npx tsx *)",
+      "Bash(npx next *)",
+      "Bash(npx tsc *)",
+      "Bash(npx shadcn@latest *)",
+      "Bash(node *)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git branch*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(gh repo view*)",
+      "Bash(vercel env *)",
+      "Bash(vercel ls*)",
+      "Bash(vercel logs *)",
+      "mcp__mongodb__list-databases",
+      "mcp__mongodb__list-collections",
+      "mcp__mongodb__collection-schema",
+      "mcp__mongodb__collection-indexes",
+      "mcp__mongodb__collection-storage-size",
+      "mcp__mongodb__db-stats",
+      "mcp__mongodb__find",
+      "mcp__mongodb__count",
+      "mcp__mongodb__aggregate",
+      "mcp__mongodb__explain"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.local)",
+      "Read(./.env*.local)",
+      "Read(./.claude/settings.local.json)"
+    ]
+  }
+}
