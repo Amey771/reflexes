@@ -27,7 +27,7 @@ export const AUDIT_RATE = 0.12;
 export type AuditUpdate = { node: NodeName; s2: Answer; agree: boolean; suggestion?: string };
 
 export type RequestResult = {
-  audit?: Promise<AuditUpdate[]>; // resolves after the decision has already been served
+  audit?: Promise<{ updates: AuditUpdate[]; cost: number }>; // resolves after the decision has already been served
   seq: number;
   batch: Request["batch"];
   recall: Pick<Recall, "available" | "top" | "novel" | "neighbors">;
@@ -135,14 +135,15 @@ export async function processRequest(
   const reflexNodes = all.filter(([n]) => decisions.find((d) => d.node === n)?.used === "reflex");
   const audit =
     reflexNodes.length && Math.random() < AUDIT_RATE
-      ? askSystem2(req, reflexNodes).then((r) =>
-          reflexNodes.map(([n]) => ({
+      ? askSystem2(req, reflexNodes).then((r) => ({
+          cost: r.cost,
+          updates: reflexNodes.map(([n]) => ({
             node: n,
             s2: r.answers[n] as Answer,
             agree: same(s1.answers[n]?.answer, r.answers[n]),
             suggestion: r.suggestions[n],
           })),
-        )
+        }))
       : undefined;
 
   return {

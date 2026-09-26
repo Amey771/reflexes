@@ -10,7 +10,8 @@ export const VECTOR_INDEX = "experience_text";
 const EMBED_MODEL = "voyage-4-lite";
 const K = 5;
 const WARMUP = 30; // experiences before novelty detection starts
-const NOVEL_PERCENTILE = 0.05;
+const NOVEL_PERCENTILE = 0.1; // novel = closest match below the 10th percentile of recent matches
+const NOVEL_WINDOW = 150;
 const TRUST_MIN = 0.6; // share of similar past cases where this reflex agreed with the teacher
 const TRUST_MIN_CASES = 2;
 
@@ -81,7 +82,7 @@ export class Memory {
         .toArray();
       const top = hits[0]?.score ?? null;
       const novel = top !== null && this.count >= WARMUP && top < percentile(this.tops, NOVEL_PERCENTILE);
-      if (top !== null) this.tops = [...this.tops.slice(-199), top];
+      if (top !== null) this.tops = [...this.tops.slice(-(NOVEL_WINDOW - 1)), top];
       const trust: Recall["trust"] = {};
       for (const n of NODES) {
         const flags = hits.map((h) => h.agree?.[n]).filter((v): v is boolean => typeof v === "boolean");

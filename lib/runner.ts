@@ -14,7 +14,7 @@ export type RunOptions = {
   log?: (msg: string) => void;
 };
 
-const MAX_REWRITES_PER_NODE = 3;
+const MAX_REWRITES_PER_NODE = 2;
 const FLOOR_TARGET = 0.95; // agreement the self-tuned confidence floor must guarantee
 
 export async function latestHarness(): Promise<Harness | null> {
@@ -209,8 +209,10 @@ export async function runSurge(opts: RunOptions = {}) {
         const seq = res.seq;
         const version = res.harness_version;
         const done = res.audit
-          .then(async (updates) => {
+          .then(async ({ updates, cost }) => {
             await writes;
+            // Audits are real spend: add their cost to the alert so cost-per-1,000 stays honest.
+            await db.collection("results").updateOne({ run_id, seq }, { $inc: { cost }, $set: { audited: true } });
             await Promise.all(
               updates.map((u) =>
                 db.collection("decisions").updateOne(
@@ -233,8 +235,11 @@ export async function runSurge(opts: RunOptions = {}) {
     }
   }
   await Promise.all(Array.from({ length: concurrency }, worker));
-  while (pending.size) await Promise.all([...pending]);
-  await lock;
+  // Drain audits and harness changes (a change can queue another, e.g. demote then rewrite).
+  for (let i = 0; i < 5; i++) {
+    while (pending.size) await Promise.all([...pending]);
+    await lock;
+  }
   await db.collection("runs").updateOne({ _id: run_id }, { $set: { status: "done", finished_at: new Date() } });
   log(`Run done: ${processed} processed, final harness v${h.version}`);
   log(NODES.map((n) => `${n}=${h.nodes[n].mode}`).join("  "));

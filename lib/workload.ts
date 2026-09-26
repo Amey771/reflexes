@@ -124,12 +124,13 @@ export function initialHarness(): Harness {
         thresholds: t,
         question: {
           type: "score",
-          instructions: "How severe is this alert?",
+          instructions:
+            "Rate severity using the SOC severity policy. Attack types are phishing, malware, credential compromise, brute force, data exfiltration, and attacks on AI agents. Breach types are malware, credential compromise, data exfiltration, and attacks on AI agents.",
           criteria: [
-            "Low: false positive or no real risk",
-            "Medium: real but contained, routine follow-up",
-            "High: active threat, or a privileged user or known-bad indicator is involved",
-            "Critical: likely breach of a high-criticality asset or privileged account, or data leaving the company",
+            "Low: a false positive (expected admin, scanner or maintenance activity)",
+            "Medium: a real event with none of the High or Critical conditions, including all policy violations and unclassifiable events",
+            "High: an attack type where the context shows a threat-intel match, a privileged user, or a high-criticality asset",
+            "Critical: a breach type affecting a high-criticality asset or a privileged user",
           ],
         },
       },
@@ -148,14 +149,20 @@ export function initialHarness(): Harness {
         thresholds: t,
         question: {
           type: "noul",
-          instructions: "Should the on-call analyst be paged right now? Page only for real threats of High or Critical severity.",
+          instructions:
+            "Should the on-call analyst be paged now? SOC paging policy: page if and only if the alert is a real threat (not a false positive) AND it is High or Critical severity, meaning an attack with a threat-intel match, a privileged user, or a high-criticality asset. Whether a tool already blocked or contained it does not matter.",
         },
       },
       playbook: {
         mode: "shadow",
         context: ["text", "facts"],
         thresholds: t,
-        question: { type: "choice", instructions: "Which response playbook should run?", criteria: PLAYBOOKS },
+        question: {
+          type: "choice",
+          instructions:
+            "Which response playbook should run? SOC runbook: false positives get close_alert; phishing gets quarantine_email; malware and data exfiltration get isolate_host; credential compromise gets reset_credentials; brute force gets block_indicator; attacks on AI agents get disable_agent_tool; policy violations and anything else get open_ticket.",
+          criteria: PLAYBOOKS,
+        },
       },
       auto_ok: {
         mode: "shadow",
@@ -164,7 +171,7 @@ export function initialHarness(): Harness {
         question: {
           type: "noul",
           instructions:
-            "Is it safe to run the response automatically, without human approval? Yes for false positives. Otherwise only if the asset is low criticality, the user is not privileged, and the alert is not Critical.",
+            "SOC auto-remediation policy: may the response run automatically, without human approval? Always yes for false positives. For real events, yes only if ALL of these hold: asset_criticality is low, user_privileged is false, and it is not a breach type (malware, credential compromise, data exfiltration, attack on an AI agent) on a high-criticality asset or privileged user. Otherwise no.",
         },
       },
     },

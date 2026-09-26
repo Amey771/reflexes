@@ -27,6 +27,7 @@ export async function rewriteQuestion(
   const suggestions = examples.map((e) => e.suggestion).filter(Boolean);
   const { output } = await generateText({
     model: openrouter(MODELS.evolver),
+    providerOptions: { openrouter: { reasoning: { enabled: false } } }, // keeps rewrites to seconds, not minutes
     output: Output.object({
       schema: z.object({
         instructions: z.string(),
@@ -35,7 +36,7 @@ export async function rewriteQuestion(
           .array(z.enum(["text", "facts"]))
           .min(1)
           .describe('Context policy: which inputs the reflex sees. "text" is the alert; "facts" are asset criticality, privileged user, threat-intel match, off-hours, repeated. Include only what the decision needs; irrelevant context makes System 1 worse.'),
-        reason: z.string().describe("One short sentence describing what you changed and why"),
+        reason: z.string().describe("What you changed and why, in 15 words or fewer (shown on a dashboard banner)"),
       }),
     }),
     system: `You maintain the "reflexes" of an AI agent harness. A reflex is a typed question answered by a System One model (Jev): fast, calibrated, but it cannot do math or date reasoning, and it gets worse with vague or overlapping options. A slower System 2 LLM is the teacher. Rewrite the reflex question (and, if useful, its context policy) so System 1 agrees with System 2. Keep existing option keys unless they are clearly wrong. Add a new option only when the teacher keeps proposing one. Make options crisp and mutually exclusive.`,
