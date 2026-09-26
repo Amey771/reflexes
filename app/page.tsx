@@ -246,7 +246,8 @@ export default function Dashboard() {
       if (!inFlight.current) {
         inFlight.current = true;
         try {
-          const r = await fetch("/api/state", { cache: "no-store" });
+          const db = new URLSearchParams(window.location.search).get("db");
+          const r = await fetch(db ? `/api/state?db=${encodeURIComponent(db)}` : "/api/state", { cache: "no-store" });
           if (alive && r.ok) setData(await r.json());
         } catch {}
         inFlight.current = false;

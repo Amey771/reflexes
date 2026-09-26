@@ -6,21 +6,28 @@ export const dynamic = "force-dynamic";
 
 const WINDOW = 20;
 
-// Alert texts never change, so read them once per server instance.
-let texts: Map<number, string> | null = null;
+// Archived runs live in sibling databases, e.g. /?db=run1 reads "reflexes_run1".
+const ARCHIVES: Record<string, string> = { run1: "reflexes_run1", run2: "reflexes_run2" };
+
+// Alert texts never change, so read them once per server instance (per database).
+const textCache = new Map<string, Map<number, string>>();
 
 // Returns the whole latest run. The dashboard renders the state "as of alert #N",
 // so the same payload drives both the live view and the replay.
-export async function GET() {
-  const db = await getDb();
+export async function GET(req: Request) {
+  const archive = new URL(req.url).searchParams.get("db");
+  const base = await getDb();
+  const db = archive && ARCHIVES[archive] ? base.client.db(ARCHIVES[archive]) : base;
   const run = await db.collection("runs").find().sort({ started_at: -1 }).limit(1).next();
-  const canRun = process.env.ALLOW_RUN === "1";
+  const canRun = process.env.ALLOW_RUN === "1" && !archive;
   if (!run) return Response.json({ run: null, canRun });
   const run_id = run._id;
 
+  let texts = textCache.get(db.databaseName);
   if (!texts) {
     const rows = await db.collection("requests").find({}, { projection: { _id: 0, seq: 1, text: 1 } }).toArray();
     texts = new Map(rows.map((r) => [r.seq as number, r.text as string]));
+    textCache.set(db.databaseName, texts);
   }
 
   const [series, decisions, events, versions] = await Promise.all([
@@ -73,7 +80,7 @@ export async function GET() {
 
   const alerts = series.map((s: Document) => ({
     seq: s.seq,
-    text: (texts!.get(s.seq) ?? "").slice(0, 220),
+    text: (texts.get(s.seq) ?? "").slice(0, 220),
     action: s.action,
     novel: !!s.novel,
     batch: s.batch,
