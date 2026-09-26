@@ -45,29 +45,30 @@ export default function Story() {
   const [idx, setIdx] = useState(0);
   const [cursor, setCursor] = useState(CHAPTERS[0].at);
   const [animating, setAnimating] = useState(false);
-  const raf = useRef<number | null>(null);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const goTo = useCallback((i: number) => {
     const ch = CHAPTERS[Math.max(0, Math.min(CHAPTERS.length - 1, i))];
     const target = CHAPTERS.indexOf(ch);
     setIdx(target);
-    if (raf.current) cancelAnimationFrame(raf.current);
+    if (timer.current) clearInterval(timer.current);
     if (ch.from == null) {
       setAnimating(false);
       setCursor(ch.at);
       return;
     }
     const from = ch.from;
-    const t0 = performance.now();
+    const t0 = Date.now();
     setAnimating(true);
     setCursor(from);
-    const step = (now: number) => {
-      const t = Math.min(1, (now - t0) / ANIM_MS);
+    timer.current = setInterval(() => {
+      const t = Math.min(1, (Date.now() - t0) / ANIM_MS);
       setCursor(Math.round(from + (ch.at - from) * ease(t)));
-      if (t < 1) raf.current = requestAnimationFrame(step);
-      else setAnimating(false);
-    };
-    raf.current = requestAnimationFrame(step);
+      if (t >= 1) {
+        if (timer.current) clearInterval(timer.current);
+        setAnimating(false);
+      }
+    }, 40);
   }, []);
 
   // Load the recorded run once; ?ch=N opens chapter N (1-based).
@@ -162,7 +163,7 @@ export default function Story() {
         </Link>
       </header>
 
-      <div className="rounded-xl border border-line bg-surface-1 px-5 py-3 text-lg text-ink-2">{PAIN}</div>
+      <div className="rounded-xl border border-line bg-surface-1 px-5 py-3 text-xl font-medium text-ink" style={{ borderLeft: "4px solid var(--thinking)" }}>{PAIN}</div>
 
       <nav className="flex flex-wrap items-center gap-2" aria-label="Chapters">
         {CHAPTERS.map((c, i) => (
@@ -185,11 +186,12 @@ export default function Story() {
         >
           Next →
         </button>
+        <span className="text-xs text-ink-3">or press →</span>
       </nav>
 
       <section>
-        <p className="text-3xl font-semibold leading-snug tracking-tight">{ch.caption}</p>
-        <p className="mt-2 text-sm text-ink-3">{ch.proof}</p>
+        <p className="text-[30px] font-semibold leading-tight tracking-tight">{ch.caption}</p>
+        <p className="mt-1.5 text-[13.5px] text-ink-3">{ch.proof}</p>
       </section>
 
       {loading ? (
@@ -199,7 +201,7 @@ export default function Story() {
           {/* Security alert */}
           <div className="flex flex-col rounded-xl border border-line bg-surface-1 p-4">
             <div className="mb-2 text-sm text-ink-3">Security alert #{view.exampleSeq}</div>
-            <pre className="max-h-44 flex-1 overflow-hidden whitespace-pre-wrap rounded-lg bg-surface-2 p-3 font-mono text-[13px] leading-relaxed text-ink">{view.alert?.text ?? "…"}</pre>
+            <pre className="max-h-40 flex-1 overflow-hidden whitespace-pre-wrap rounded-lg bg-surface-2 p-3 font-mono text-[13px] leading-relaxed text-ink">{view.alert?.text ?? "…"}</pre>
             <ul className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1 text-sm">
               {NODES.map((n) => {
                 const used = view.example.find((d) => d.node === n)?.used;
@@ -223,25 +225,24 @@ export default function Story() {
               return (
                 <div
                   key={n}
-                  className="flex flex-col justify-between rounded-xl border bg-surface-1 p-4 transition-colors"
+                  className="flex flex-col justify-between rounded-xl border bg-surface-1 p-3.5 transition-colors"
                   style={{
                     borderColor: focus ? "var(--text-primary)" : "var(--border)",
                     boxShadow: focus ? "0 0 0 2px var(--text-primary)" : state === "reflex" ? `inset 0 0 0 1px ${STATE_COLOR.reflex}` : undefined,
                   }}
                 >
-                  <div className="text-lg font-medium">{NODE_LABEL[n]}</div>
-                  <div className="mt-3 flex items-center gap-2" style={{ color: STATE_COLOR[state] }}>
-                    <span className="text-3xl leading-none" aria-hidden>{LEGEND[state].icon}</span>
-                    <span className="text-lg font-semibold">{LEGEND[state].label}</span>
+                  <div className="text-base font-medium text-ink-2">{NODE_LABEL[n]}</div>
+                  <div className="mt-2 flex items-center gap-2" style={{ color: STATE_COLOR[state] }}>
+                    <span className="text-4xl leading-none" aria-hidden>{LEGEND[state].icon}</span>
+                    <span className="text-2xl font-bold leading-tight">{LEGEND[state].label}</span>
                   </div>
                   <div className="mt-1 text-xs text-ink-3">{LEGEND[state].sub}</div>
-                  {added.length > 0 && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {added.map((k) => (
-                        <span key={k} className="whitespace-nowrap rounded-full bg-surface-2 px-2 py-0.5 text-[11px] font-medium text-good">+ {k}</span>
-                      ))}
+                  {added.map((k) => (
+                    <div key={k} className="mt-2 rounded-lg border px-2 py-1" style={{ borderColor: "var(--status-good)", background: "color-mix(in oklab, var(--status-good) 14%, transparent)" }}>
+                      <div className="text-[10px] font-semibold uppercase tracking-wider text-good">New category</div>
+                      <div className="break-all font-mono text-[13px] font-semibold text-good">+ {k}</div>
                     </div>
-                  )}
+                  ))}
                 </div>
               );
             })}
@@ -252,7 +253,7 @@ export default function Story() {
           {/* Action taken */}
           <div className="flex flex-col justify-center rounded-xl border border-line bg-surface-1 p-4">
             <div className="text-sm text-ink-3">Action taken</div>
-            <div className="mt-2 text-xl font-semibold leading-snug">{view.alert?.action ?? "…"}</div>
+            <div className="mt-2 text-lg font-semibold leading-snug">{view.alert?.action ?? "…"}</div>
           </div>
         </section>
       )}
@@ -266,6 +267,7 @@ export default function Story() {
             </div>
             <div className="mt-1 text-sm text-ink-3">
               was {ch.metric ? ch.metric.before : view.costWas != null ? `$${(view.costWas * 1000).toFixed(2)}` : "–"} with every decision on the LLM
+              {!ch.metric && view.cost != null && view.costWas != null && view.cost > view.costWas && " · up while the LLM handles what the reflexes haven't learned yet"}
             </div>
           </div>
           <div className="rounded-xl border border-line bg-surface-1 p-4">
@@ -281,7 +283,7 @@ export default function Story() {
           {RESULTS.map((r) => (
             <div key={r.label} className="rounded-xl border border-line bg-surface-1 p-4">
               <div className="text-sm text-ink-3">{r.label}</div>
-              <div className="mt-1 text-2xl font-semibold tabular-nums">{r.value}</div>
+              <div className="mt-1 text-[28px] font-bold leading-tight tabular-nums">{r.value}</div>
               <div className="mt-1 text-xs text-ink-3">{r.note}</div>
             </div>
           ))}
