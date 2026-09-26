@@ -30,7 +30,15 @@ export type RequestResult = {
   audit?: Promise<{ updates: AuditUpdate[]; cost: number }>; // resolves after the decision has already been served
   seq: number;
   batch: Request["batch"];
-  recall: Pick<Recall, "available" | "top" | "novel" | "neighbors">;
+  recall: Recall;
+  // Per-stage timings and costs for one alert (the sandbox shows them; the runner ignores them).
+  trace: {
+    recall_ms: number;
+    s1_ms: number;
+    s1_cost: number;
+    s2_learning?: { nodes: NodeName[]; ms: number; cost: number }; // started right away for nodes still learning
+    s2_fallback?: { nodes: NodeName[]; ms: number; cost: number }; // reflexes that stepped aside
+  };
   ms: number;
   cost: number;
   decisions: Decision[];
@@ -84,6 +92,7 @@ export async function processRequest(
   req: Request,
   h: Harness,
   recall: (text: string) => Promise<Recall>,
+  opts: { audit?: boolean } = {}, // audit: false skips the random background audit
 ): Promise<RequestResult> {
   const t0 = performance.now();
   const all = NODES.map((n) => [n, h.nodes[n]] as [NodeName, NodeConfig]);
@@ -91,7 +100,13 @@ export async function processRequest(
   const s2First = all.filter(([, c]) => c.mode === "shadow");
   const s2Promise: Promise<System2Result | null> = s2First.length ? askSystem2(req, s2First) : Promise.resolve(null);
   s2Promise.catch(() => {}); // if System 1 fails first, don't leave this rejection unhandled
-  const [s1, mem] = await Promise.all([runSystem1(req, all), recall(req.text)]);
+  let recall_ms = 0;
+  const tRecall = performance.now();
+  const recalled = recall(req.text).then((r) => {
+    recall_ms = Math.round(performance.now() - tRecall);
+    return r;
+  });
+  const [s1, mem] = await Promise.all([runSystem1(req, all), recalled]);
 
   // A reflex falls back to System 2 when Jev isn't confident, when the alert is unlike anything
   // in memory, or when this reflex hasn't proven itself on similar past alerts.
@@ -135,7 +150,7 @@ export async function processRequest(
   // Async audit: re-check this alert's reflex decisions with System 2, off the latency path.
   const reflexNodes = all.filter(([n]) => decisions.find((d) => d.node === n)?.used === "reflex");
   const audit =
-    reflexNodes.length && Math.random() < AUDIT_RATE
+    opts.audit !== false && reflexNodes.length && Math.random() < AUDIT_RATE
       ? askSystem2(req, reflexNodes).then((r) => ({
           cost: r.cost,
           updates: reflexNodes.map(([n]) => ({
@@ -151,7 +166,14 @@ export async function processRequest(
     audit,
     seq: req.seq,
     batch: req.batch,
-    recall: { available: mem.available, top: mem.top, novel: mem.novel, neighbors: mem.neighbors },
+    recall: mem,
+    trace: {
+      recall_ms,
+      s1_ms: s1.ms,
+      s1_cost: s1.cost,
+      ...(s2a ? { s2_learning: { nodes: s2First.map(([n]) => n), ms: s2a.ms, cost: s2a.cost } } : {}),
+      ...(s2b ? { s2_fallback: { nodes: fallback.map(([n]) => n), ms: s2b.ms, cost: s2b.cost } } : {}),
+    },
     ms: Math.round(performance.now() - t0),
     cost: s1.cost + (s2a?.cost ?? 0) + (s2b?.cost ?? 0),
     decisions,

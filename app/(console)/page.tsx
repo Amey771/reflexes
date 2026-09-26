@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { IconLLM, IconReflex, IconRewrite } from "@/app/icons";
@@ -497,6 +498,9 @@ export default function Overview() {
               )}
             </>
           )}
+          <Link href="/sandbox" className="rounded-full border border-ink-3 px-4 py-2 text-sm font-medium text-ink hover:border-ink">
+            Try one alert
+          </Link>
           {data?.canRun && (
             <button onClick={start} className="rounded-full bg-ink px-4 py-2 text-sm font-semibold text-page hover:opacity-90">
               Start alert storm

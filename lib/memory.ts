@@ -12,8 +12,8 @@ const K = 5;
 const WARMUP = 30; // experiences before novelty detection starts
 const NOVEL_PERCENTILE = 0.05; // novel = closest match below the 5th percentile of recent matches
 const NOVEL_WINDOW = 150;
-const TRUST_MIN = 0.5; // share of similar past cases where this reflex agreed with the teacher
-const TRUST_MIN_CASES = 3;
+export const TRUST_MIN = 0.5; // share of similar past cases where this reflex agreed with the teacher
+export const TRUST_MIN_CASES = 3;
 
 export type Recall = {
   available: boolean;
@@ -21,6 +21,8 @@ export type Recall = {
   novel: boolean;
   trust: Partial<Record<NodeName, { cases: number; rate: number }>>;
   neighbors: number[]; // seqs of the similar past alerts
+  hits: { seq: number; score: number; agree?: Partial<Record<NodeName, boolean>> }[]; // the recalled neighbors
+  novel_below: number | null; // similarity under which an alert counts as novel (null during warm-up)
 };
 
 export function untrusted(r: Recall, node: NodeName): boolean {
@@ -68,27 +70,61 @@ export class Memory {
     private log: (m: string) => void = console.log,
   ) {}
 
-  async recall(text: string): Promise<Recall> {
-    const empty: Recall = { available: false, top: null, novel: false, trust: {}, neighbors: [] };
+  // Memory over an existing run's experience (count and recent closest-match scores), so novelty
+  // can be judged outside the live runner. Read-only.
+  static async forRun(run_id: ObjectId) {
+    const db = await getDb();
+    const m = new Memory(run_id, () => {});
+    const [count, rows] = await Promise.all([
+      db.collection("experience").countDocuments({ run_id }),
+      db
+        .collection("results")
+        .find({ run_id, recall_top: { $ne: null } }, { projection: { _id: 0, recall_top: 1 } })
+        .sort({ seq: -1 })
+        .limit(NOVEL_WINDOW)
+        .toArray(),
+    ]);
+    m.count = count;
+    m.tops = rows.map((r) => r.recall_top as number).reverse();
+    return m;
+  }
+
+  get experiences() {
+    return this.count;
+  }
+
+  // `exclude`: a seq left out of the neighbors, so an alert never matches its own past record.
+  async recall(text: string, opts: { exclude?: number } = {}): Promise<Recall> {
+    const empty: Recall = { available: false, top: null, novel: false, trust: {}, neighbors: [], hits: [], novel_below: null };
     if (this.count < 3) return { ...empty, available: true };
     try {
       const db = await getDb();
       const hits = await db
         .collection("experience")
         .aggregate([
-          { $vectorSearch: { index: VECTOR_INDEX, path: "text", query: text, limit: K, numCandidates: 60, filter: { run_id: this.run_id } } },
+          { $vectorSearch: { index: VECTOR_INDEX, path: "text", query: text, limit: K + (opts.exclude !== undefined ? 1 : 0), numCandidates: 60, filter: { run_id: this.run_id } } },
           { $project: { _id: 0, seq: 1, agree: 1, score: { $meta: "vectorSearchScore" } } },
         ])
-        .toArray();
+        .toArray()
+        .then((rows) => rows.filter((h) => h.seq !== opts.exclude).slice(0, K));
       const top = hits[0]?.score ?? null;
-      const novel = top !== null && this.count >= WARMUP && top < percentile(this.tops, NOVEL_PERCENTILE);
+      const novel_below = this.count >= WARMUP ? percentile(this.tops, NOVEL_PERCENTILE) : null;
+      const novel = top !== null && novel_below !== null && top < novel_below;
       if (top !== null) this.tops = [...this.tops.slice(-(NOVEL_WINDOW - 1)), top];
       const trust: Recall["trust"] = {};
       for (const n of NODES) {
         const flags = hits.map((h) => h.agree?.[n]).filter((v): v is boolean => typeof v === "boolean");
         if (flags.length) trust[n] = { cases: flags.length, rate: flags.filter(Boolean).length / flags.length };
       }
-      return { available: true, top, novel, trust, neighbors: hits.map((h) => h.seq) };
+      return {
+        available: true,
+        top,
+        novel,
+        trust,
+        neighbors: hits.map((h) => h.seq),
+        hits: hits.map((h) => ({ seq: h.seq, score: h.score, agree: h.agree })),
+        novel_below,
+      };
     } catch (e) {
       if (!this.warned) this.log(`Memory recall unavailable: ${(e as Error).message}`);
       this.warned = true;

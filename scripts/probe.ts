@@ -13,7 +13,7 @@ const START = Number(process.argv[3] ?? 0);
 async function main() {
   const alerts: Request[] = JSON.parse(readFileSync("data/alerts.json", "utf8")).slice(START, START + N);
   const h = initialHarness();
-  const noMemory = async () => ({ available: false, top: null, novel: false, trust: {}, neighbors: [] });
+  const noMemory = async () => ({ available: false, top: null, novel: false, trust: {}, neighbors: [], hits: [], novel_below: null });
   const results: RequestResult[] = [];
   const queue = [...alerts];
   await Promise.all(
