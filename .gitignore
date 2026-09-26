@@ -23,3 +23,6 @@ __pycache__/
 
 # private strategy notes (kept local, not for judges)
 HACKATHON_PLAYBOOK.md
+
+# agent worktrees
+.claude/worktrees/
