@@ -9,7 +9,13 @@
     "lint": "eslint",
     "seed": "tsx scripts/seed.ts",
     "run": "tsx scripts/run.ts",
-    "jev": "tsx scripts/jev-smoke.ts"
+    "jev": "tsx scripts/jev-smoke.ts",
+    "core:build": "npm run build --prefix packages/core",
+    "core:test": "npm run core:build && npm test --prefix packages/core",
+    "core:example": "npm run core:build && npm run example --prefix packages/core",
+    "research:replay": "npm run core:build && node research/replay.mts",
+    "core:lint": "eslint packages/core/src packages/core/test packages/core/examples research",
+    "research:test": "node --test research/replay.test.mjs"
   },
   "dependencies": {
     "@openrouter/ai-sdk-provider": "^3.1.0",

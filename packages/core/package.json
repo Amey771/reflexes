@@ -1,0 +1,15 @@
+{
+  "name": "@reflexes/core",
+  "version": "0.1.0-alpha.0",
+  "private": true,
+  "description": "Provider-independent lifecycle controller for repeated typed agent decisions",
+  "type": "module",
+  "exports": { ".": { "types": "./dist/index.d.ts", "import": "./dist/index.js" } },
+  "files": ["dist", "README.md"],
+  "engines": { "node": ">=22.18" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "node --test test/*.test.mts",
+    "example": "node examples/support.mts"
+  }
+}

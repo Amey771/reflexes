@@ -1,5 +1,7 @@
 # Reflexes
 
+> **2026-10-21 · reusable-core redesign (experimental alpha).** A provider-independent core and offline evaluation now live alongside the original hackathon demo. Start with the [redesign and eight-week plan](research/PLAN.md), [core quickstart](packages/core/README.md), [evaluation protocol](research/PROTOCOL.md), and [synthetic stress-test results](research/results/SYNTHETIC.md). The new core is unpublished and its real-model performance is not yet established. The results below describe the original recorded SOC run.
+
 **Agents that grow reflexes.** An agent harness that learns from its own experience and moves each decision from an LLM to a System One reflex (about 250 ms for an all-reflex alert) once the decision has proven reliable. It demotes and rewrites that reflex when the world changes. In our final run, **81% of decisions moved off the LLM** within ~24 alerts. That cut cost per alert 2.6× for a 4-point accuracy trade, and the harness taught itself a new attack category when a campaign appeared.
 
 - **Demo video (1 min):** [watch on Google Drive](https://drive.google.com/file/d/1jdCyouNxa7JHIP45sKMwOq8E8JSqFSij/view)
