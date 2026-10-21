@@ -1,0 +1,26 @@
+name: Reflexes core
+on:
+  pull_request:
+  push:
+    branches: [main, research/adaptive-reflex-core]
+permissions:
+  contents: read
+jobs:
+  offline:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [22, 24]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+      - run: npm ci --ignore-scripts
+      - run: npm run core:test
+      - run: npm run research:test
+      - run: npm run core:lint
+      - run: npx next typegen && npx tsc --noEmit -p .
+      - run: npm run research:replay
+      - run: git diff --exit-code -- research/results
